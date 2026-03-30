@@ -1,4 +1,5 @@
 import SwiftUI
+import MapKit
 
 struct ContentView: View {
     @State private var searchText = ""
@@ -16,7 +17,9 @@ struct ContentView: View {
             rating: 4.7,
             address: "4163 W 5th St, Los Angeles, CA",
             description: "Known for comforting seolleongtang and late-night Korean comfort food.",
-            imageName: "hanbat"
+            imageName: "hanbat",
+            latitude: 34.0637,
+            longitude: -118.3067
         ),
         Restaurant(
             id: "marugame",
@@ -25,7 +28,9 @@ struct ContentView: View {
             rating: 4.5,
             address: "700 W 7th St, Los Angeles, CA",
             description: "Fresh udon, tempura, and quick casual Japanese meals.",
-            imageName: "marugame"
+            imageName: "marugame",
+            latitude: 34.0489,
+            longitude: -118.2572
         ),
         Restaurant(
             id: "bcd",
@@ -34,10 +39,11 @@ struct ContentView: View {
             rating: 4.6,
             address: "3575 Wilshire Blvd, Los Angeles, CA",
             description: "Popular for soft tofu soup, Korean side dishes, and casual group meals.",
-            imageName: "bcd"
+            imageName: "bcd",
+            latitude: 34.0615,
+            longitude: -118.3009
         )
     ]
-
     var filteredRestaurants: [Restaurant] {
         restaurants.filter { restaurant in
             let matchesCuisine = selectedCuisine == "All" || restaurant.cuisine == selectedCuisine
@@ -89,7 +95,13 @@ struct ContentView: View {
             .tabItem {
                 Label("Home", systemImage: "house")
             }
-
+            NavigationStack {
+                RestaurantMapView(restaurants: restaurants)
+                    .navigationTitle("Map")
+            }
+            .tabItem {
+                Label("Map", systemImage: "map")
+            }
             NavigationStack {
                 if favorites.isEmpty {
                     VStack(spacing: 12) {
@@ -123,6 +135,7 @@ struct ContentView: View {
             loadFavorites()
         }
     }
+    
 
     func saveFavorites() {
         do {
@@ -244,6 +257,35 @@ struct RestaurantDetailView: View {
         }
         .navigationTitle("Details")
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+struct RestaurantMapView: View {
+    let restaurants: [Restaurant]
+
+    @State private var position = MapCameraPosition.region(
+        MKCoordinateRegion(
+            center: CLLocationCoordinate2D(latitude: 34.0575, longitude: -118.2870),
+            span: MKCoordinateSpan(latitudeDelta: 0.08, longitudeDelta: 0.08)
+        )
+    )
+
+    var body: some View {
+        Map(position: $position) {
+            ForEach(restaurants) { restaurant in
+                Annotation(restaurant.name, coordinate: CLLocationCoordinate2D(latitude: restaurant.latitude, longitude: restaurant.longitude)) {
+                    NavigationLink(destination: RestaurantDetailView(restaurant: restaurant)) {
+                        VStack(spacing: 4) {
+                            Image(systemName: "mappin.circle.fill")
+                                .font(.title)
+                                .foregroundStyle(.red)
+
+                        }
+                    }
+                }
+            }
+        }
+        .ignoresSafeArea(edges: .bottom)
     }
 }
 

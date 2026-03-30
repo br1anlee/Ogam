@@ -8,4 +8,6 @@ struct Restaurant: Identifiable, Hashable, Codable {
     let address: String
     let description: String
     let imageName: String
+    let latitude: Double
+    let longitude: Double
 }
