@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct ContentView: View {
+    @State private var searchText = ""
+
     let restaurants: [Restaurant] = [
         Restaurant(
             name: "Han Bat Sul Lung Tang",
@@ -28,9 +30,21 @@ struct ContentView: View {
         )
     ]
 
+    var filteredRestaurants: [Restaurant] {
+        if searchText.isEmpty {
+            return restaurants
+        } else {
+            return restaurants.filter { restaurant in
+                restaurant.name.localizedCaseInsensitiveContains(searchText) ||
+                restaurant.cuisine.localizedCaseInsensitiveContains(searchText) ||
+                restaurant.address.localizedCaseInsensitiveContains(searchText)
+            }
+        }
+    }
+
     var body: some View {
         NavigationStack {
-            List(restaurants) { restaurant in
+            List(filteredRestaurants) { restaurant in
                 NavigationLink(destination: RestaurantDetailView(restaurant: restaurant)) {
                     HStack(spacing: 12) {
                         Image(restaurant.imageName)
@@ -62,6 +76,7 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("Food App")
+            .searchable(text: $searchText, prompt: "Search restaurants or cuisine")
         }
     }
 }
@@ -96,8 +111,6 @@ struct RestaurantDetailView: View {
 
                 Text(restaurant.description)
                     .font(.body)
-
-                Spacer()
             }
             .padding()
         }
