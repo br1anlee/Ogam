@@ -7,21 +7,24 @@ struct ContentView: View {
             cuisine: "Korean",
             rating: 4.7,
             address: "4163 W 5th St, Los Angeles, CA",
-            description: "Known for comforting seolleongtang and late-night Korean comfort food."
+            description: "Known for comforting seolleongtang and late-night Korean comfort food.",
+            imageName: "hanbat"
         ),
         Restaurant(
             name: "Marugame Udon",
             cuisine: "Japanese",
             rating: 4.5,
             address: "700 W 7th St, Los Angeles, CA",
-            description: "Fresh udon, tempura, and quick casual Japanese meals."
+            description: "Fresh udon, tempura, and quick casual Japanese meals.",
+            imageName: "marugame"
         ),
         Restaurant(
             name: "BCD Tofu House",
             cuisine: "Korean",
             rating: 4.6,
             address: "3575 Wilshire Blvd, Los Angeles, CA",
-            description: "Popular for soft tofu soup, Korean side dishes, and casual group meals."
+            description: "Popular for soft tofu soup, Korean side dishes, and casual group meals.",
+            imageName: "bcd"
         )
     ]
 
@@ -29,22 +32,31 @@ struct ContentView: View {
         NavigationStack {
             List(restaurants) { restaurant in
                 NavigationLink(destination: RestaurantDetailView(restaurant: restaurant)) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(restaurant.name)
-                            .font(.headline)
+                    HStack(spacing: 12) {
+                        Image(restaurant.imageName)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 80, height: 80)
+                            .clipped()
+                            .cornerRadius(12)
 
-                        Text(restaurant.cuisine)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(restaurant.name)
+                                .font(.headline)
 
-                        HStack {
-                            Text("⭐️ \(restaurant.rating, specifier: "%.1f")")
-                            Text("•")
-                            Text(restaurant.address)
-                                .lineLimit(1)
+                            Text(restaurant.cuisine)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+
+                            HStack {
+                                Text("⭐️ \(restaurant.rating, specifier: "%.1f")")
+                                Text("•")
+                                Text(restaurant.address)
+                                    .lineLimit(1)
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.gray)
                         }
-                        .font(.caption)
-                        .foregroundStyle(.gray)
                     }
                     .padding(.vertical, 4)
                 }
@@ -60,13 +72,13 @@ struct RestaurantDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color.gray.opacity(0.2))
+                Image(restaurant.imageName)
+                    .resizable()
+                    .scaledToFill()
                     .frame(height: 220)
-                    .overlay(
-                        Text("Image Placeholder")
-                            .foregroundStyle(.secondary)
-                    )
+                    .frame(maxWidth: .infinity)
+                    .clipped()
+                    .cornerRadius(16)
 
                 Text(restaurant.name)
                     .font(.largeTitle)

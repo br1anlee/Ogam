@@ -7,4 +7,5 @@ struct Restaurant: Identifiable {
     let rating: Double
     let address: String
     let description: String
+    let imageName: String
 }
