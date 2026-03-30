@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @State private var searchText = ""
     @State private var selectedCuisine = "All"
+    @State private var favorites: Set<Restaurant> = []
 
     let cuisineOptions = ["All", "Korean", "Japanese"]
 
@@ -47,62 +48,130 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            VStack {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 10) {
-                        ForEach(cuisineOptions, id: \.self) { cuisine in
-                            Button(action: {
-                                selectedCuisine = cuisine
-                            }) {
-                                Text(cuisine)
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 8)
-                                    .background(selectedCuisine == cuisine ? Color.blue : Color.gray.opacity(0.2))
-                                    .foregroundColor(selectedCuisine == cuisine ? .white : .primary)
-                                    .cornerRadius(20)
-                            }
-                        }
-                    }
-                    .padding(.horizontal)
-                }
-                .padding(.top, 8)
-
-                List(filteredRestaurants) { restaurant in
-                    NavigationLink(destination: RestaurantDetailView(restaurant: restaurant)) {
-                        HStack(spacing: 12) {
-                            Image(restaurant.imageName)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: 80, height: 80)
-                                .clipped()
-                                .cornerRadius(12)
-
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(restaurant.name)
-                                    .font(.headline)
-
-                                Text(restaurant.cuisine)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-
-                                HStack {
-                                    Text("⭐️ \(restaurant.rating, specifier: "%.1f")")
-                                    Text("•")
-                                    Text(restaurant.address)
-                                        .lineLimit(1)
+        TabView {
+            NavigationStack {
+                VStack {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(cuisineOptions, id: \.self) { cuisine in
+                                Button(action: {
+                                    selectedCuisine = cuisine
+                                }) {
+                                    Text(cuisine)
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 8)
+                                        .background(selectedCuisine == cuisine ? Color.blue : Color.gray.opacity(0.2))
+                                        .foregroundColor(selectedCuisine == cuisine ? .white : .primary)
+                                        .cornerRadius(20)
                                 }
-                                .font(.caption)
-                                .foregroundStyle(.gray)
                             }
                         }
-                        .padding(.vertical, 4)
+                        .padding(.horizontal)
+                    }
+                    .padding(.top, 8)
+
+                    List(filteredRestaurants) { restaurant in
+                        RestaurantRowView(
+                            restaurant: restaurant,
+                            favorites: $favorites
+                        )
+                    }
+                    .listStyle(.plain)
+                }
+                .navigationTitle("Food App")
+                .searchable(text: $searchText, prompt: "Search restaurants or cuisine")
+            }
+            .tabItem {
+                Label("Home", systemImage: "house")
+            }
+
+            NavigationStack {
+                if favorites.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "heart")
+                            .font(.system(size: 40))
+                            .foregroundStyle(.gray)
+
+                        Text("No saved restaurants yet")
+                            .font(.headline)
+
+                        Text("Tap the heart on a restaurant to save it.")
+                            .foregroundStyle(.secondary)
+                    }
+                    .navigationTitle("Saved")
+                } else {
+                    List(Array(favorites)) { restaurant in
+                        RestaurantRowView(
+                            restaurant: restaurant,
+                            favorites: $favorites
+                        )
+                    }
+                    .navigationTitle("Saved")
+                }
+            }
+            .tabItem {
+                Label("Saved", systemImage: "heart")
+            }
+        }
+    }
+}
+
+struct RestaurantRowView: View {
+    let restaurant: Restaurant
+    @Binding var favorites: Set<Restaurant>
+
+    var body: some View {
+        HStack(spacing: 12) {
+            NavigationLink(destination: RestaurantDetailView(restaurant: restaurant)) {
+                HStack(spacing: 12) {
+                    Image(restaurant.imageName)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 80, height: 80)
+                        .clipped()
+                        .cornerRadius(12)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(restaurant.name)
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+
+                        Text(restaurant.cuisine)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+
+                        HStack {
+                            Text("⭐️ \(restaurant.rating, specifier: "%.1f")")
+                            Text("•")
+                            Text(restaurant.address)
+                                .lineLimit(1)
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.gray)
                     }
                 }
-                .listStyle(.plain)
             }
-            .navigationTitle("Food App")
-            .searchable(text: $searchText, prompt: "Search restaurants or cuisine")
+            .buttonStyle(.plain)
+
+            Spacer()
+
+            Button(action: {
+                toggleFavorite()
+            }) {
+                Image(systemName: favorites.contains(restaurant) ? "heart.fill" : "heart")
+                    .foregroundStyle(favorites.contains(restaurant) ? .red : .gray)
+                    .font(.title3)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, 4)
+    }
+
+    func toggleFavorite() {
+        if favorites.contains(restaurant) {
+            favorites.remove(restaurant)
+        } else {
+            favorites.insert(restaurant)
         }
     }
 }

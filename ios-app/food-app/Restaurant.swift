@@ -1,6 +1,6 @@
 import Foundation
 
-struct Restaurant: Identifiable {
+struct Restaurant: Identifiable, Hashable {
     let id = UUID()
     let name: String
     let cuisine: String
