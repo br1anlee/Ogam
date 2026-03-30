@@ -2,6 +2,9 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var searchText = ""
+    @State private var selectedCuisine = "All"
+
+    let cuisineOptions = ["All", "Korean", "Japanese"]
 
     let restaurants: [Restaurant] = [
         Restaurant(
@@ -31,49 +34,72 @@ struct ContentView: View {
     ]
 
     var filteredRestaurants: [Restaurant] {
-        if searchText.isEmpty {
-            return restaurants
-        } else {
-            return restaurants.filter { restaurant in
+        restaurants.filter { restaurant in
+            let matchesCuisine = selectedCuisine == "All" || restaurant.cuisine == selectedCuisine
+            let matchesSearch =
+                searchText.isEmpty ||
                 restaurant.name.localizedCaseInsensitiveContains(searchText) ||
                 restaurant.cuisine.localizedCaseInsensitiveContains(searchText) ||
                 restaurant.address.localizedCaseInsensitiveContains(searchText)
-            }
+
+            return matchesCuisine && matchesSearch
         }
     }
 
     var body: some View {
         NavigationStack {
-            List(filteredRestaurants) { restaurant in
-                NavigationLink(destination: RestaurantDetailView(restaurant: restaurant)) {
-                    HStack(spacing: 12) {
-                        Image(restaurant.imageName)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(width: 80, height: 80)
-                            .clipped()
-                            .cornerRadius(12)
-
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(restaurant.name)
-                                .font(.headline)
-
-                            Text(restaurant.cuisine)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-
-                            HStack {
-                                Text("⭐️ \(restaurant.rating, specifier: "%.1f")")
-                                Text("•")
-                                Text(restaurant.address)
-                                    .lineLimit(1)
+            VStack {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(cuisineOptions, id: \.self) { cuisine in
+                            Button(action: {
+                                selectedCuisine = cuisine
+                            }) {
+                                Text(cuisine)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 8)
+                                    .background(selectedCuisine == cuisine ? Color.blue : Color.gray.opacity(0.2))
+                                    .foregroundColor(selectedCuisine == cuisine ? .white : .primary)
+                                    .cornerRadius(20)
                             }
-                            .font(.caption)
-                            .foregroundStyle(.gray)
                         }
                     }
-                    .padding(.vertical, 4)
+                    .padding(.horizontal)
                 }
+                .padding(.top, 8)
+
+                List(filteredRestaurants) { restaurant in
+                    NavigationLink(destination: RestaurantDetailView(restaurant: restaurant)) {
+                        HStack(spacing: 12) {
+                            Image(restaurant.imageName)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: 80, height: 80)
+                                .clipped()
+                                .cornerRadius(12)
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(restaurant.name)
+                                    .font(.headline)
+
+                                Text(restaurant.cuisine)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+
+                                HStack {
+                                    Text("⭐️ \(restaurant.rating, specifier: "%.1f")")
+                                    Text("•")
+                                    Text(restaurant.address)
+                                        .lineLimit(1)
+                                }
+                                .font(.caption)
+                                .foregroundStyle(.gray)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+                .listStyle(.plain)
             }
             .navigationTitle("Food App")
             .searchable(text: $searchText, prompt: "Search restaurants or cuisine")
