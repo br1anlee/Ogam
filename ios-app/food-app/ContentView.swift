@@ -1,61 +1,99 @@
-//
-//  ContentView.swift
-//  food-app
-//
-//  Created by Brian Lee on 3/29/26.
-//
-
 import SwiftUI
-import SwiftData
 
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+    let restaurants: [Restaurant] = [
+        Restaurant(
+            name: "Han Bat Sul Lung Tang",
+            cuisine: "Korean",
+            rating: 4.7,
+            address: "4163 W 5th St, Los Angeles, CA",
+            description: "Known for comforting seolleongtang and late-night Korean comfort food."
+        ),
+        Restaurant(
+            name: "Marugame Udon",
+            cuisine: "Japanese",
+            rating: 4.5,
+            address: "700 W 7th St, Los Angeles, CA",
+            description: "Fresh udon, tempura, and quick casual Japanese meals."
+        ),
+        Restaurant(
+            name: "BCD Tofu House",
+            cuisine: "Korean",
+            rating: 4.6,
+            address: "3575 Wilshire Blvd, Los Angeles, CA",
+            description: "Popular for soft tofu soup, Korean side dishes, and casual group meals."
+        )
+    ]
 
     var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
+        NavigationStack {
+            List(restaurants) { restaurant in
+                NavigationLink(destination: RestaurantDetailView(restaurant: restaurant)) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(restaurant.name)
+                            .font(.headline)
+
+                        Text(restaurant.cuisine)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+
+                        HStack {
+                            Text("⭐️ \(restaurant.rating, specifier: "%.1f")")
+                            Text("•")
+                            Text(restaurant.address)
+                                .lineLimit(1)
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.gray)
                     }
-                }
-                .onDelete(perform: deleteItems)
-            }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
-                }
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
+                    .padding(.vertical, 4)
                 }
             }
-        } detail: {
-            Text("Select an item")
+            .navigationTitle("Food App")
         }
     }
+}
 
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
-        }
-    }
+struct RestaurantDetailView: View {
+    let restaurant: Restaurant
 
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.gray.opacity(0.2))
+                    .frame(height: 220)
+                    .overlay(
+                        Text("Image Placeholder")
+                            .foregroundStyle(.secondary)
+                    )
+
+                Text(restaurant.name)
+                    .font(.largeTitle)
+                    .fontWeight(.bold)
+
+                HStack {
+                    Text(restaurant.cuisine)
+                    Text("⭐️ \(restaurant.rating, specifier: "%.1f")")
+                }
+                .font(.headline)
+                .foregroundStyle(.secondary)
+
+                Text(restaurant.address)
+                    .font(.subheadline)
+
+                Text(restaurant.description)
+                    .font(.body)
+
+                Spacer()
             }
+            .padding()
         }
+        .navigationTitle("Details")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
 #Preview {
     ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
 }
