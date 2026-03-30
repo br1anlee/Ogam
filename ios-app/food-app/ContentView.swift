@@ -6,9 +6,11 @@ struct ContentView: View {
     @State private var favorites: Set<Restaurant> = []
 
     let cuisineOptions = ["All", "Korean", "Japanese"]
+    let favoritesKey = "favorite_restaurants"
 
     let restaurants: [Restaurant] = [
         Restaurant(
+            id: "hanbat",
             name: "Han Bat Sul Lung Tang",
             cuisine: "Korean",
             rating: 4.7,
@@ -17,6 +19,7 @@ struct ContentView: View {
             imageName: "hanbat"
         ),
         Restaurant(
+            id: "marugame",
             name: "Marugame Udon",
             cuisine: "Japanese",
             rating: 4.5,
@@ -25,6 +28,7 @@ struct ContentView: View {
             imageName: "marugame"
         ),
         Restaurant(
+            id: "bcd",
             name: "BCD Tofu House",
             cuisine: "Korean",
             rating: 4.6,
@@ -73,7 +77,8 @@ struct ContentView: View {
                     List(filteredRestaurants) { restaurant in
                         RestaurantRowView(
                             restaurant: restaurant,
-                            favorites: $favorites
+                            favorites: $favorites,
+                            onFavoritesChanged: saveFavorites
                         )
                     }
                     .listStyle(.plain)
@@ -100,10 +105,11 @@ struct ContentView: View {
                     }
                     .navigationTitle("Saved")
                 } else {
-                    List(Array(favorites)) { restaurant in
+                    List(Array(favorites).sorted(by: { $0.name < $1.name })) { restaurant in
                         RestaurantRowView(
                             restaurant: restaurant,
-                            favorites: $favorites
+                            favorites: $favorites,
+                            onFavoritesChanged: saveFavorites
                         )
                     }
                     .navigationTitle("Saved")
@@ -113,12 +119,37 @@ struct ContentView: View {
                 Label("Saved", systemImage: "heart")
             }
         }
+        .onAppear {
+            loadFavorites()
+        }
+    }
+
+    func saveFavorites() {
+        do {
+            let favoritesArray = Array(favorites)
+            let data = try JSONEncoder().encode(favoritesArray)
+            UserDefaults.standard.set(data, forKey: favoritesKey)
+        } catch {
+            print("Failed to save favorites:", error)
+        }
+    }
+
+    func loadFavorites() {
+        guard let data = UserDefaults.standard.data(forKey: favoritesKey) else { return }
+
+        do {
+            let decodedFavorites = try JSONDecoder().decode([Restaurant].self, from: data)
+            favorites = Set(decodedFavorites)
+        } catch {
+            print("Failed to load favorites:", error)
+        }
     }
 }
 
 struct RestaurantRowView: View {
     let restaurant: Restaurant
     @Binding var favorites: Set<Restaurant>
+    let onFavoritesChanged: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
@@ -173,6 +204,8 @@ struct RestaurantRowView: View {
         } else {
             favorites.insert(restaurant)
         }
+
+        onFavoritesChanged()
     }
 }
 
