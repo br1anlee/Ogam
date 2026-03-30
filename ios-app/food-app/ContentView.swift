@@ -44,6 +44,7 @@ struct ContentView: View {
             longitude: -118.3009
         )
     ]
+
     var filteredRestaurants: [Restaurant] {
         restaurants.filter { restaurant in
             let matchesCuisine = selectedCuisine == "All" || restaurant.cuisine == selectedCuisine
@@ -95,6 +96,7 @@ struct ContentView: View {
             .tabItem {
                 Label("Home", systemImage: "house")
             }
+
             NavigationStack {
                 RestaurantMapView(restaurants: restaurants)
                     .navigationTitle("Map")
@@ -102,6 +104,7 @@ struct ContentView: View {
             .tabItem {
                 Label("Map", systemImage: "map")
             }
+
             NavigationStack {
                 if favorites.isEmpty {
                     VStack(spacing: 12) {
@@ -135,7 +138,6 @@ struct ContentView: View {
             loadFavorites()
         }
     }
-    
 
     func saveFavorites() {
         do {
@@ -263,6 +265,8 @@ struct RestaurantDetailView: View {
 struct RestaurantMapView: View {
     let restaurants: [Restaurant]
 
+    @StateObject private var locationManager = LocationManager()
+    @State private var hasCenteredOnUser = false
     @State private var position = MapCameraPosition.region(
         MKCoordinateRegion(
             center: CLLocationCoordinate2D(latitude: 34.0575, longitude: -118.2870),
@@ -272,20 +276,43 @@ struct RestaurantMapView: View {
 
     var body: some View {
         Map(position: $position) {
-            ForEach(restaurants) { restaurant in
-                Annotation(restaurant.name, coordinate: CLLocationCoordinate2D(latitude: restaurant.latitude, longitude: restaurant.longitude)) {
-                    NavigationLink(destination: RestaurantDetailView(restaurant: restaurant)) {
-                        VStack(spacing: 4) {
-                            Image(systemName: "mappin.circle.fill")
-                                .font(.title)
-                                .foregroundStyle(.red)
+            UserAnnotation()
 
-                        }
+            ForEach(restaurants) { restaurant in
+                Annotation("", coordinate: CLLocationCoordinate2D(latitude: restaurant.latitude, longitude: restaurant.longitude)) {
+                    VStack(spacing: 4) {
+                        Image(systemName: "mappin.circle.fill")
+                            .font(.title)
+                            .foregroundStyle(.red)
+
+                        Text(restaurant.name)
+                            .font(.caption2)
+                            .padding(6)
+                            .background(.thinMaterial)
+                            .cornerRadius(8)
                     }
                 }
             }
         }
+        .mapControls {
+            MapUserLocationButton()
+        }
         .ignoresSafeArea(edges: .bottom)
+        .onAppear {
+            locationManager.requestLocationAccess()
+        }
+        .onReceive(locationManager.$userLocation) { newLocation in
+            guard let newLocation, !hasCenteredOnUser else { return }
+
+            position = .region(
+                MKCoordinateRegion(
+                    center: newLocation,
+                    span: MKCoordinateSpan(latitudeDelta: 0.03, longitudeDelta: 0.03)
+                )
+            )
+
+            hasCenteredOnUser = true
+        }
     }
 }
 
