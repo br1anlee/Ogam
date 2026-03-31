@@ -119,12 +119,9 @@ struct SearchMapView: View {
 
     @State private var foodQuery = ""
     @State private var locationQuery = ""
-    @State private var selectedCuisine = "All"
     @State private var hasCenteredInitially = false
     @State private var selectedRestaurant: Restaurant?
     @State private var isListExpanded = true
-
-    let cuisineOptions = ["All", "Korean", "Japanese"]
 
     @State private var position = MapCameraPosition.region(
         MKCoordinateRegion(
@@ -134,15 +131,13 @@ struct SearchMapView: View {
     )
 
     var filteredRestaurants: [Restaurant] {
-        let cuisineFiltered = restaurants.filter { restaurant in
-            selectedCuisine == "All" || restaurant.cuisine == selectedCuisine
-        }
+        let base = restaurants
 
         let foodFiltered: [Restaurant]
         if foodQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            foodFiltered = cuisineFiltered
+            foodFiltered = base
         } else {
-            foodFiltered = cuisineFiltered.filter { restaurant in
+            foodFiltered = base.filter { restaurant in
                 restaurant.name.localizedCaseInsensitiveContains(foodQuery) ||
                 restaurant.cuisine.localizedCaseInsensitiveContains(foodQuery) ||
                 restaurant.address.localizedCaseInsensitiveContains(foodQuery) ||
@@ -192,36 +187,27 @@ struct SearchMapView: View {
                 .ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    VStack(spacing: 12) {
+                    HStack(spacing: 8) {
                         TextField("Korean BBQ, ramen, cafe", text: $foodQuery)
                             .textFieldStyle(.roundedBorder)
+                            .font(.subheadline)
+                            .submitLabel(.search)
+                            .frame(maxWidth: .infinity)
 
-                        HStack {
-                            TextField("Current location, ZIP, city, neighborhood", text: $locationQuery)
-                                .textFieldStyle(.roundedBorder)
+                        TextField("Current location, ZIP, city, neighborhood", text: $locationQuery)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.subheadline)
+                            .submitLabel(.search)
+                            .frame(maxWidth: .infinity)
 
-                            Button("Search") {
-                                runLocationSearch()
-                            }
-                            .buttonStyle(.borderedProminent)
+                        Button("Search") {
+                            runLocationSearch()
                         }
-
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 10) {
-                                ForEach(cuisineOptions, id: \.self) { cuisine in
-                                    Button {
-                                        selectedCuisine = cuisine
-                                    } label: {
-                                        Text(cuisine)
-                                            .padding(.horizontal, 14)
-                                            .padding(.vertical, 8)
-                                            .background(selectedCuisine == cuisine ? Color.blue : Color.white.opacity(0.9))
-                                            .foregroundColor(selectedCuisine == cuisine ? .white : .primary)
-                                            .cornerRadius(20)
-                                    }
-                                }
-                            }
-                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .controlSize(.small)
+                    .onSubmit {
+                        runLocationSearch()
                     }
                     .padding()
                     .background(.ultraThinMaterial)
