@@ -1,12 +1,10 @@
 import SwiftUI
 import MapKit
+import CoreLocation
 
 struct ContentView: View {
-    @State private var searchText = ""
-    @State private var selectedCuisine = "All"
     @State private var favorites: Set<Restaurant> = []
 
-    let cuisineOptions = ["All", "Korean", "Japanese"]
     let favoritesKey = "favorite_restaurants"
 
     let restaurants: [Restaurant] = [
@@ -45,64 +43,15 @@ struct ContentView: View {
         )
     ]
 
-    var filteredRestaurants: [Restaurant] {
-        restaurants.filter { restaurant in
-            let matchesCuisine = selectedCuisine == "All" || restaurant.cuisine == selectedCuisine
-            let matchesSearch =
-                searchText.isEmpty ||
-                restaurant.name.localizedCaseInsensitiveContains(searchText) ||
-                restaurant.cuisine.localizedCaseInsensitiveContains(searchText) ||
-                restaurant.address.localizedCaseInsensitiveContains(searchText)
-
-            return matchesCuisine && matchesSearch
-        }
-    }
-
     var body: some View {
         TabView {
-            NavigationStack {
-                VStack {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 10) {
-                            ForEach(cuisineOptions, id: \.self) { cuisine in
-                                Button(action: {
-                                    selectedCuisine = cuisine
-                                }) {
-                                    Text(cuisine)
-                                        .padding(.horizontal, 14)
-                                        .padding(.vertical, 8)
-                                        .background(selectedCuisine == cuisine ? Color.blue : Color.gray.opacity(0.2))
-                                        .foregroundColor(selectedCuisine == cuisine ? .white : .primary)
-                                        .cornerRadius(20)
-                                }
-                            }
-                        }
-                        .padding(.horizontal)
-                    }
-                    .padding(.top, 8)
-
-                    List(filteredRestaurants) { restaurant in
-                        RestaurantRowView(
-                            restaurant: restaurant,
-                            favorites: $favorites,
-                            onFavoritesChanged: saveFavorites
-                        )
-                    }
-                    .listStyle(.plain)
-                }
-                .navigationTitle("Food App")
-                .searchable(text: $searchText, prompt: "Search restaurants or cuisine")
-            }
+            SearchMapView(
+                restaurants: restaurants,
+                favorites: $favorites,
+                onFavoritesChanged: saveFavorites
+            )
             .tabItem {
-                Label("Home", systemImage: "house")
-            }
-
-            NavigationStack {
-                RestaurantMapView(restaurants: restaurants)
-                    .navigationTitle("Map")
-            }
-            .tabItem {
-                Label("Map", systemImage: "map")
+                Label("Search", systemImage: "magnifyingglass")
             }
 
             NavigationStack {
@@ -158,6 +107,329 @@ struct ContentView: View {
         } catch {
             print("Failed to load favorites:", error)
         }
+    }
+}
+
+struct SearchMapView: View {
+    let restaurants: [Restaurant]
+    @Binding var favorites: Set<Restaurant>
+    let onFavoritesChanged: () -> Void
+
+    @StateObject private var locationManager = LocationManager()
+
+    @State private var foodQuery = ""
+    @State private var locationQuery = ""
+    @State private var selectedCuisine = "All"
+    @State private var hasCenteredInitially = false
+    @State private var selectedRestaurant: Restaurant?
+    @State private var isListExpanded = true
+
+    let cuisineOptions = ["All", "Korean", "Japanese"]
+
+    @State private var position = MapCameraPosition.region(
+        MKCoordinateRegion(
+            center: CLLocationCoordinate2D(latitude: 34.0575, longitude: -118.2870),
+            span: MKCoordinateSpan(latitudeDelta: 0.08, longitudeDelta: 0.08)
+        )
+    )
+
+    var filteredRestaurants: [Restaurant] {
+        let cuisineFiltered = restaurants.filter { restaurant in
+            selectedCuisine == "All" || restaurant.cuisine == selectedCuisine
+        }
+
+        let foodFiltered: [Restaurant]
+        if foodQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            foodFiltered = cuisineFiltered
+        } else {
+            foodFiltered = cuisineFiltered.filter { restaurant in
+                restaurant.name.localizedCaseInsensitiveContains(foodQuery) ||
+                restaurant.cuisine.localizedCaseInsensitiveContains(foodQuery) ||
+                restaurant.address.localizedCaseInsensitiveContains(foodQuery) ||
+                restaurant.description.localizedCaseInsensitiveContains(foodQuery)
+            }
+        }
+
+        guard let center = coordinateForLocationQuery() else {
+            return foodFiltered
+        }
+
+        return foodFiltered.filter { restaurant in
+            distance(from: center, to: restaurant) <= 10000
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack(alignment: .bottom) {
+                Map(position: $position) {
+                    UserAnnotation()
+
+                    ForEach(filteredRestaurants) { restaurant in
+                        Annotation("", coordinate: CLLocationCoordinate2D(latitude: restaurant.latitude, longitude: restaurant.longitude)) {
+                            Button {
+                                selectedRestaurant = restaurant
+                            } label: {
+                                VStack(spacing: 4) {
+                                    Image(systemName: "mappin.circle.fill")
+                                        .font(.title)
+                                        .foregroundStyle(.red)
+
+                                    Text(restaurant.name)
+                                        .font(.caption2)
+                                        .padding(6)
+                                        .background(.thinMaterial)
+                                        .cornerRadius(8)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .mapControls {
+                    MapUserLocationButton()
+                }
+                .ignoresSafeArea()
+
+                VStack(spacing: 0) {
+                    VStack(spacing: 12) {
+                        TextField("Korean BBQ, ramen, cafe", text: $foodQuery)
+                            .textFieldStyle(.roundedBorder)
+
+                        HStack {
+                            TextField("Current location, ZIP, city, neighborhood", text: $locationQuery)
+                                .textFieldStyle(.roundedBorder)
+
+                            Button("Search") {
+                                runLocationSearch()
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 10) {
+                                ForEach(cuisineOptions, id: \.self) { cuisine in
+                                    Button {
+                                        selectedCuisine = cuisine
+                                    } label: {
+                                        Text(cuisine)
+                                            .padding(.horizontal, 14)
+                                            .padding(.vertical, 8)
+                                            .background(selectedCuisine == cuisine ? Color.blue : Color.white.opacity(0.9))
+                                            .foregroundColor(selectedCuisine == cuisine ? .white : .primary)
+                                            .cornerRadius(20)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .padding()
+                    .background(.ultraThinMaterial)
+
+                    Spacer()
+                }
+
+                bottomResultsPanel
+            }
+            .navigationTitle("Search")
+            .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                locationManager.requestLocationAccess()
+            }
+            .onReceive(locationManager.$userLocation) { newLocation in
+                guard let newLocation, !hasCenteredInitially else { return }
+
+                position = .region(
+                    MKCoordinateRegion(
+                        center: newLocation,
+                        span: MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: 0.05)
+                    )
+                )
+                hasCenteredInitially = true
+            }
+            .sheet(item: $selectedRestaurant) { restaurant in
+                NavigationStack {
+                    RestaurantDetailView(restaurant: restaurant)
+                }
+            }
+        }
+    }
+
+    var bottomResultsPanel: some View {
+        VStack(spacing: 0) {
+            Button {
+                withAnimation(.easeInOut) {
+                    isListExpanded.toggle()
+                }
+            } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(filteredRestaurants.count) Restaurants")
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+
+                        Text(isListExpanded ? "Tap to hide" : "Tap to show")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Image(systemName: isListExpanded ? "chevron.down" : "chevron.up")
+                        .foregroundStyle(.primary)
+                }
+                .padding()
+                .background(.ultraThinMaterial)
+            }
+            .buttonStyle(.plain)
+
+            if isListExpanded {
+                if filteredRestaurants.isEmpty {
+                    VStack(spacing: 8) {
+                        Text("No restaurants found")
+                            .font(.headline)
+                        Text("Try another cuisine or location.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(.ultraThinMaterial)
+                } else {
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            ForEach(filteredRestaurants) { restaurant in
+                                RestaurantSheetRowView(
+                                    restaurant: restaurant,
+                                    favorites: $favorites,
+                                    onFavoritesChanged: onFavoritesChanged,
+                                    onSelect: {
+                                        centerMap(on: restaurant)
+                                        selectedRestaurant = restaurant
+                                    }
+                                )
+
+                                Divider()
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 320)
+                    .background(.ultraThinMaterial)
+                }
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .padding(.horizontal)
+        .padding(.bottom, 12)
+        .shadow(radius: 6)
+    }
+
+    func runLocationSearch() {
+        if let coordinate = coordinateForLocationQuery() {
+            position = .region(
+                MKCoordinateRegion(
+                    center: coordinate,
+                    span: MKCoordinateSpan(latitudeDelta: 0.08, longitudeDelta: 0.08)
+                )
+            )
+        }
+    }
+
+    func centerMap(on restaurant: Restaurant) {
+        position = .region(
+            MKCoordinateRegion(
+                center: CLLocationCoordinate2D(latitude: restaurant.latitude, longitude: restaurant.longitude),
+                span: MKCoordinateSpan(latitudeDelta: 0.03, longitudeDelta: 0.03)
+            )
+        )
+    }
+
+    func coordinateForLocationQuery() -> CLLocationCoordinate2D? {
+        let trimmed = locationQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        if trimmed.isEmpty || trimmed == "current location" {
+            return locationManager.userLocation
+        }
+
+        switch trimmed {
+        case "los angeles", "los angeles, ca":
+            return CLLocationCoordinate2D(latitude: 34.0522, longitude: -118.2437)
+        case "koreatown", "koreatown los angeles", "koreatown, los angeles, ca", "90020":
+            return CLLocationCoordinate2D(latitude: 34.0617, longitude: -118.3009)
+        case "alhambra", "alhambra, ca":
+            return CLLocationCoordinate2D(latitude: 34.0953, longitude: -118.1270)
+        case "culver city", "culver city, ca":
+            return CLLocationCoordinate2D(latitude: 34.0211, longitude: -118.3965)
+        default:
+            return nil
+        }
+    }
+
+    func distance(from center: CLLocationCoordinate2D, to restaurant: Restaurant) -> Double {
+        let centerLocation = CLLocation(latitude: center.latitude, longitude: center.longitude)
+        let restaurantLocation = CLLocation(latitude: restaurant.latitude, longitude: restaurant.longitude)
+        return centerLocation.distance(from: restaurantLocation)
+    }
+}
+
+struct RestaurantSheetRowView: View {
+    let restaurant: Restaurant
+    @Binding var favorites: Set<Restaurant>
+    let onFavoritesChanged: () -> Void
+    let onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 12) {
+                Image(restaurant.imageName)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 88, height: 88)
+                    .clipped()
+                    .cornerRadius(12)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(restaurant.name)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+
+                    Text(restaurant.cuisine)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    Text("⭐️ \(restaurant.rating, specifier: "%.1f")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text(restaurant.address)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                Button(action: toggleFavorite) {
+                    Image(systemName: favorites.contains(restaurant) ? "heart.fill" : "heart")
+                        .foregroundStyle(favorites.contains(restaurant) ? .red : .gray)
+                        .font(.title3)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding()
+            .background(Color.clear)
+        }
+        .buttonStyle(.plain)
+    }
+
+    func toggleFavorite() {
+        if favorites.contains(restaurant) {
+            favorites.remove(restaurant)
+        } else {
+            favorites.insert(restaurant)
+        }
+        onFavoritesChanged()
     }
 }
 
@@ -259,60 +531,6 @@ struct RestaurantDetailView: View {
         }
         .navigationTitle("Details")
         .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-struct RestaurantMapView: View {
-    let restaurants: [Restaurant]
-
-    @StateObject private var locationManager = LocationManager()
-    @State private var hasCenteredOnUser = false
-    @State private var position = MapCameraPosition.region(
-        MKCoordinateRegion(
-            center: CLLocationCoordinate2D(latitude: 34.0575, longitude: -118.2870),
-            span: MKCoordinateSpan(latitudeDelta: 0.08, longitudeDelta: 0.08)
-        )
-    )
-
-    var body: some View {
-        Map(position: $position) {
-            UserAnnotation()
-
-            ForEach(restaurants) { restaurant in
-                Annotation("", coordinate: CLLocationCoordinate2D(latitude: restaurant.latitude, longitude: restaurant.longitude)) {
-                    VStack(spacing: 4) {
-                        Image(systemName: "mappin.circle.fill")
-                            .font(.title)
-                            .foregroundStyle(.red)
-
-                        Text(restaurant.name)
-                            .font(.caption2)
-                            .padding(6)
-                            .background(.thinMaterial)
-                            .cornerRadius(8)
-                    }
-                }
-            }
-        }
-        .mapControls {
-            MapUserLocationButton()
-        }
-        .ignoresSafeArea(edges: .bottom)
-        .onAppear {
-            locationManager.requestLocationAccess()
-        }
-        .onReceive(locationManager.$userLocation) { newLocation in
-            guard let newLocation, !hasCenteredOnUser else { return }
-
-            position = .region(
-                MKCoordinateRegion(
-                    center: newLocation,
-                    span: MKCoordinateSpan(latitudeDelta: 0.03, longitudeDelta: 0.03)
-                )
-            )
-
-            hasCenteredOnUser = true
-        }
     }
 }
 
