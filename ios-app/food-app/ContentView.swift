@@ -121,8 +121,9 @@ struct SearchMapView: View {
     @State private var locationQuery = ""
     @State private var hasCenteredInitially = false
     @State private var selectedRestaurant: Restaurant?
+    @State private var pendingSelectionID: String? = nil
     @State private var isListExpanded = true
-
+    @State private var focusedRestaurantID: String? = nil
     @State private var position = MapCameraPosition.region(
         MKCoordinateRegion(
             center: CLLocationCoordinate2D(latitude: 34.0575, longitude: -118.2870),
@@ -185,6 +186,22 @@ struct SearchMapView: View {
                     MapUserLocationButton()
                 }
                 .ignoresSafeArea()
+                .overlay(alignment: .topTrailing) {
+                    Button {
+                        recenterToUser()
+                    } label: {
+                        Image(systemName: "location.fill")
+                            .font(.title2)
+                            .foregroundStyle(.primary)
+                            .padding(10)
+                            .background(.ultraThinMaterial)
+                            .clipShape(Circle())
+                            .shadow(radius: 3)
+                    }
+                    .padding(.trailing, 16)
+                    .padding(.top, 96)
+                    .accessibilityLabel("Recenter on your location")
+                }
 
                 VStack(spacing: 0) {
                     HStack(spacing: 8) {
@@ -272,9 +289,9 @@ struct SearchMapView: View {
             if isListExpanded {
                 if filteredRestaurants.isEmpty {
                     VStack(spacing: 8) {
-                        Text("No restaurants found")
+                        Text("No results found")
                             .font(.headline)
-                        Text("Try another cuisine or location.")
+                        Text("Try another search term or location.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -290,11 +307,15 @@ struct SearchMapView: View {
                                     favorites: $favorites,
                                     onFavoritesChanged: onFavoritesChanged,
                                     onSelect: {
-                                        centerMap(on: restaurant)
-                                        selectedRestaurant = restaurant
+                                        if pendingSelectionID == restaurant.id {
+                                            selectedRestaurant = restaurant
+                                            pendingSelectionID = nil
+                                        } else {
+                                            centerMap(on: restaurant)
+                                            pendingSelectionID = restaurant.id
+                                        }
                                     }
                                 )
-
                                 Divider()
                             }
                         }
@@ -321,6 +342,18 @@ struct SearchMapView: View {
         }
     }
 
+    func recenterToUser() {
+        guard let userLocation = locationManager.userLocation else { return }
+        withAnimation(.easeInOut) {
+            position = .region(
+                MKCoordinateRegion(
+                    center: userLocation,
+                    span: MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: 0.05)
+                )
+            )
+        }
+    }
+
     func centerMap(on restaurant: Restaurant) {
         position = .region(
             MKCoordinateRegion(
@@ -340,7 +373,7 @@ struct SearchMapView: View {
         switch trimmed {
         case "los angeles", "los angeles, ca":
             return CLLocationCoordinate2D(latitude: 34.0522, longitude: -118.2437)
-        case "koreatown", "koreatown los angeles", "koreatown, los angeles, ca", "90020":
+        case "koreatown", "koreatown los angeles", "koreatown, los angeles, ca":
             return CLLocationCoordinate2D(latitude: 34.0617, longitude: -118.3009)
         case "alhambra", "alhambra, ca":
             return CLLocationCoordinate2D(latitude: 34.0953, longitude: -118.1270)
