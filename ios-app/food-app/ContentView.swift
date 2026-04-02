@@ -3,50 +3,21 @@ import MapKit
 import CoreLocation
 
 struct ContentView: View {
-    @State private var favorites: Set<Restaurant> = []
+    @EnvironmentObject var repository: RestaurantRepository
+    @State private var favorites: Set<String> = []  // Now stores restaurant IDs
 
     let favoritesKey = "favorite_restaurants"
 
-    let restaurants: [Restaurant] = [
-        Restaurant(
-            id: "hanbat",
-            name: "Han Bat Sul Lung Tang",
-            cuisine: "Korean",
-            rating: 4.7,
-            address: "4163 W 5th St, Los Angeles, CA",
-            description: "Known for comforting seolleongtang and late-night Korean comfort food.",
-            imageName: "hanbat",
-            latitude: 34.0637,
-            longitude: -118.3067
-        ),
-        Restaurant(
-            id: "marugame",
-            name: "Marugame Udon",
-            cuisine: "Japanese",
-            rating: 4.5,
-            address: "700 W 7th St, Los Angeles, CA",
-            description: "Fresh udon, tempura, and quick casual Japanese meals.",
-            imageName: "marugame",
-            latitude: 34.0489,
-            longitude: -118.2572
-        ),
-        Restaurant(
-            id: "bcd",
-            name: "BCD Tofu House",
-            cuisine: "Korean",
-            rating: 4.6,
-            address: "3575 Wilshire Blvd, Los Angeles, CA",
-            description: "Popular for soft tofu soup, Korean side dishes, and casual group meals.",
-            imageName: "bcd",
-            latitude: 34.0615,
-            longitude: -118.3009
-        )
-    ]
+    var favoriteRestaurants: [Restaurant] {
+        repository.restaurants.filter { restaurant in
+            guard let id = restaurant.id else { return false }
+            return favorites.contains(id)
+        }
+    }
 
     var body: some View {
         TabView {
             SearchMapView(
-                restaurants: restaurants,
                 favorites: $favorites,
                 onFavoritesChanged: saveFavorites
             )
@@ -55,7 +26,7 @@ struct ContentView: View {
             }
 
             NavigationStack {
-                if favorites.isEmpty {
+                if favoriteRestaurants.isEmpty {
                     VStack(spacing: 12) {
                         Image(systemName: "heart")
                             .font(.system(size: 40))
@@ -69,7 +40,7 @@ struct ContentView: View {
                     }
                     .navigationTitle("Saved")
                 } else {
-                    List(Array(favorites).sorted(by: { $0.name < $1.name })) { restaurant in
+                    List(favoriteRestaurants.sorted(by: { $0.name < $1.name })) { restaurant in
                         RestaurantRowView(
                             restaurant: restaurant,
                             favorites: $favorites,
@@ -85,6 +56,11 @@ struct ContentView: View {
         }
         .onAppear {
             loadFavorites()
+            // Start listening to Firestore updates
+            repository.startListening()
+        }
+        .onDisappear {
+            repository.stopListening()
         }
     }
 
@@ -102,7 +78,7 @@ struct ContentView: View {
         guard let data = UserDefaults.standard.data(forKey: favoritesKey) else { return }
 
         do {
-            let decodedFavorites = try JSONDecoder().decode([Restaurant].self, from: data)
+            let decodedFavorites = try JSONDecoder().decode([String].self, from: data)
             favorites = Set(decodedFavorites)
         } catch {
             print("Failed to load favorites:", error)
@@ -111,8 +87,8 @@ struct ContentView: View {
 }
 
 struct SearchMapView: View {
-    let restaurants: [Restaurant]
-    @Binding var favorites: Set<Restaurant>
+    @EnvironmentObject var repository: RestaurantRepository
+    @Binding var favorites: Set<String>
     let onFavoritesChanged: () -> Void
 
     @StateObject private var locationManager = LocationManager()
@@ -126,24 +102,19 @@ struct SearchMapView: View {
     @State private var focusedRestaurantID: String? = nil
     @State private var position = MapCameraPosition.region(
         MKCoordinateRegion(
-            center: CLLocationCoordinate2D(latitude: 34.0575, longitude: -118.2870),
+            center: CLLocationCoordinate2D(latitude: 37.5665, longitude: 126.9780), // Seoul, Korea
             span: MKCoordinateSpan(latitudeDelta: 0.08, longitudeDelta: 0.08)
         )
     )
 
     var filteredRestaurants: [Restaurant] {
-        let base = restaurants
+        let base = repository.restaurants
 
         let foodFiltered: [Restaurant]
         if foodQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             foodFiltered = base
         } else {
-            foodFiltered = base.filter { restaurant in
-                restaurant.name.localizedCaseInsensitiveContains(foodQuery) ||
-                restaurant.cuisine.localizedCaseInsensitiveContains(foodQuery) ||
-                restaurant.address.localizedCaseInsensitiveContains(foodQuery) ||
-                restaurant.description.localizedCaseInsensitiveContains(foodQuery)
-            }
+            foodFiltered = repository.searchByText(foodQuery)
         }
 
         guard let center = coordinateForLocationQuery() else {
@@ -320,7 +291,7 @@ struct SearchMapView: View {
                             }
                         }
                     }
-                    .frame(maxHeight: 320)
+                    .frame(maxHeight: 250)
                     .background(.ultraThinMaterial)
                 }
             }
@@ -370,15 +341,35 @@ struct SearchMapView: View {
             return locationManager.userLocation
         }
 
+        // Korean cities and neighborhoods
         switch trimmed {
+        case "seoul", "서울":
+            return CLLocationCoordinate2D(latitude: 37.5665, longitude: 126.9780)
+        case "gangnam", "강남":
+            return CLLocationCoordinate2D(latitude: 37.4979, longitude: 127.0276)
+        case "hongdae", "홍대":
+            return CLLocationCoordinate2D(latitude: 37.5563, longitude: 126.9236)
+        case "itaewon", "이태원":
+            return CLLocationCoordinate2D(latitude: 37.5346, longitude: 126.9946)
+        case "myeongdong", "명동":
+            return CLLocationCoordinate2D(latitude: 37.5636, longitude: 126.9826)
+        case "busan", "부산":
+            return CLLocationCoordinate2D(latitude: 35.1796, longitude: 129.0756)
+        case "incheon", "인천":
+            return CLLocationCoordinate2D(latitude: 37.4563, longitude: 126.7052)
+        case "daegu", "대구":
+            return CLLocationCoordinate2D(latitude: 35.8714, longitude: 128.6014)
+        case "daejeon", "대전":
+            return CLLocationCoordinate2D(latitude: 36.3504, longitude: 127.3845)
+        case "gwangju", "광주":
+            return CLLocationCoordinate2D(latitude: 35.1595, longitude: 126.8526)
+        case "jeonju", "전주":
+            return CLLocationCoordinate2D(latitude: 35.8242, longitude: 127.1480)
+        // Keep LA locations for backward compatibility
         case "los angeles", "los angeles, ca":
             return CLLocationCoordinate2D(latitude: 34.0522, longitude: -118.2437)
         case "koreatown", "koreatown los angeles", "koreatown, los angeles, ca":
             return CLLocationCoordinate2D(latitude: 34.0617, longitude: -118.3009)
-        case "alhambra", "alhambra, ca":
-            return CLLocationCoordinate2D(latitude: 34.0953, longitude: -118.1270)
-        case "culver city", "culver city, ca":
-            return CLLocationCoordinate2D(latitude: 34.0211, longitude: -118.3965)
         default:
             return nil
         }
@@ -393,19 +384,39 @@ struct SearchMapView: View {
 
 struct RestaurantSheetRowView: View {
     let restaurant: Restaurant
-    @Binding var favorites: Set<Restaurant>
+    @Binding var favorites: Set<String>
     let onFavoritesChanged: () -> Void
     let onSelect: () -> Void
+    
+    var isFavorite: Bool {
+        guard let id = restaurant.id else { return false }
+        return favorites.contains(id)
+    }
 
     var body: some View {
         Button(action: onSelect) {
             HStack(spacing: 12) {
-                Image(restaurant.imageName)
-                    .resizable()
-                    .scaledToFill()
+                // Use AsyncImage for Firebase Storage URLs
+                if let imageURL = restaurant.imageURL, let url = URL(string: imageURL) {
+                    AsyncImage(url: url) { image in
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    } placeholder: {
+                        ProgressView()
+                    }
                     .frame(width: 88, height: 88)
                     .clipped()
                     .cornerRadius(12)
+                } else {
+                    // Fallback to local image
+                    Image(restaurant.imageName)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 88, height: 88)
+                        .clipped()
+                        .cornerRadius(12)
+                }
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text(restaurant.name)
@@ -430,8 +441,8 @@ struct RestaurantSheetRowView: View {
                 Spacer()
 
                 Button(action: toggleFavorite) {
-                    Image(systemName: favorites.contains(restaurant) ? "heart.fill" : "heart")
-                        .foregroundStyle(favorites.contains(restaurant) ? .red : .gray)
+                    Image(systemName: isFavorite ? "heart.fill" : "heart")
+                        .foregroundStyle(isFavorite ? .red : .gray)
                         .font(.title3)
                 }
                 .buttonStyle(.plain)
@@ -443,10 +454,11 @@ struct RestaurantSheetRowView: View {
     }
 
     func toggleFavorite() {
-        if favorites.contains(restaurant) {
-            favorites.remove(restaurant)
+        guard let id = restaurant.id else { return }
+        if favorites.contains(id) {
+            favorites.remove(id)
         } else {
-            favorites.insert(restaurant)
+            favorites.insert(id)
         }
         onFavoritesChanged()
     }
@@ -454,19 +466,39 @@ struct RestaurantSheetRowView: View {
 
 struct RestaurantRowView: View {
     let restaurant: Restaurant
-    @Binding var favorites: Set<Restaurant>
+    @Binding var favorites: Set<String>
     let onFavoritesChanged: () -> Void
+    
+    var isFavorite: Bool {
+        guard let id = restaurant.id else { return false }
+        return favorites.contains(id)
+    }
 
     var body: some View {
         HStack(spacing: 12) {
             NavigationLink(destination: RestaurantDetailView(restaurant: restaurant)) {
                 HStack(spacing: 12) {
-                    Image(restaurant.imageName)
-                        .resizable()
-                        .scaledToFill()
+                    // Use AsyncImage for Firebase Storage URLs
+                    if let imageURL = restaurant.imageURL, let url = URL(string: imageURL) {
+                        AsyncImage(url: url) { image in
+                            image
+                                .resizable()
+                                .scaledToFill()
+                        } placeholder: {
+                            ProgressView()
+                        }
                         .frame(width: 80, height: 80)
                         .clipped()
                         .cornerRadius(12)
+                    } else {
+                        // Fallback to local image
+                        Image(restaurant.imageName)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 80, height: 80)
+                            .clipped()
+                            .cornerRadius(12)
+                    }
 
                     VStack(alignment: .leading, spacing: 6) {
                         Text(restaurant.name)
@@ -495,8 +527,8 @@ struct RestaurantRowView: View {
             Button(action: {
                 toggleFavorite()
             }) {
-                Image(systemName: favorites.contains(restaurant) ? "heart.fill" : "heart")
-                    .foregroundStyle(favorites.contains(restaurant) ? .red : .gray)
+                Image(systemName: isFavorite ? "heart.fill" : "heart")
+                    .foregroundStyle(isFavorite ? .red : .gray)
                     .font(.title3)
             }
             .buttonStyle(.plain)
@@ -505,10 +537,11 @@ struct RestaurantRowView: View {
     }
 
     func toggleFavorite() {
-        if favorites.contains(restaurant) {
-            favorites.remove(restaurant)
+        guard let id = restaurant.id else { return }
+        if favorites.contains(id) {
+            favorites.remove(id)
         } else {
-            favorites.insert(restaurant)
+            favorites.insert(id)
         }
 
         onFavoritesChanged()
@@ -521,13 +554,29 @@ struct RestaurantDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Image(restaurant.imageName)
-                    .resizable()
-                    .scaledToFill()
+                // Use AsyncImage for Firebase Storage URLs
+                if let imageURL = restaurant.imageURL, let url = URL(string: imageURL) {
+                    AsyncImage(url: url) { image in
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    } placeholder: {
+                        ProgressView()
+                    }
                     .frame(height: 220)
                     .frame(maxWidth: .infinity)
                     .clipped()
                     .cornerRadius(16)
+                } else {
+                    // Fallback to local image
+                    Image(restaurant.imageName)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(height: 220)
+                        .frame(maxWidth: .infinity)
+                        .clipped()
+                        .cornerRadius(16)
+                }
 
                 Text(restaurant.name)
                     .font(.largeTitle)
@@ -536,15 +585,50 @@ struct RestaurantDetailView: View {
                 HStack {
                     Text(restaurant.cuisine)
                     Text("⭐️ \(restaurant.rating, specifier: "%.1f")")
+                    
+                    if let priceRange = restaurant.priceRange {
+                        Text(String(repeating: "₩", count: priceRange))
+                            .foregroundStyle(.orange)
+                    }
                 }
                 .font(.headline)
                 .foregroundStyle(.secondary)
 
                 Text(restaurant.address)
                     .font(.subheadline)
+                
+                if let phoneNumber = restaurant.phoneNumber {
+                    Link(phoneNumber, destination: URL(string: "tel:\(phoneNumber)")!)
+                        .font(.subheadline)
+                }
+                
+                if let hours = restaurant.hours {
+                    HStack {
+                        Image(systemName: "clock")
+                        Text(hours)
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                }
 
                 Text(restaurant.description)
                     .font(.body)
+                
+                if let tags = restaurant.tags, !tags.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack {
+                            ForEach(tags, id: \.self) { tag in
+                                Text(tag)
+                                    .font(.caption)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(.blue.opacity(0.1))
+                                    .foregroundStyle(.blue)
+                                    .cornerRadius(16)
+                            }
+                        }
+                    }
+                }
             }
             .padding()
         }

@@ -7,9 +7,12 @@
 
 import SwiftUI
 import SwiftData
+import FirebaseCore
 
 @main
 struct food_appApp: App {
+    @StateObject private var restaurantRepository = RestaurantRepository()
+    
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
             Item.self,
@@ -22,10 +25,16 @@ struct food_appApp: App {
             fatalError("Could not create ModelContainer: \(error)")
         }
     }()
+    
+    init() {
+        // Configure Firebase on app launch
+        FirebaseConfig.shared.configure()
+    }
 
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(restaurantRepository)
         }
         .modelContainer(sharedModelContainer)
     }
