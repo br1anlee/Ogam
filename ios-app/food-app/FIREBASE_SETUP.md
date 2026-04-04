@@ -44,19 +44,28 @@ In Firebase Console → Firestore Database → Rules, paste this:
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow anyone to read restaurants
+    // Allow anyone to read restaurants and their Google data
     match /restaurants/{restaurant} {
       allow read: if true;
       allow write: if false;  // Change to true if you want users to add restaurants
     }
     
-    // You can add user-specific collections later
+    // Optional: Store user-specific data (favorites, notes, etc.)
     match /users/{userId}/{document=**} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Optional: User reviews (if you add this feature)
+    match /user_reviews/{reviewId} {
+      allow read: if true;
+      allow create: if request.auth != null;
+      allow update, delete: if request.auth != null && request.auth.uid == resource.data.userId;
     }
   }
 }
 ```
+
+**Note:** Google data (reviews, photos, ratings) will be stored as fields within restaurant documents, so no additional rules needed!
 
 ## Step 4: Configure Storage Security Rules
 

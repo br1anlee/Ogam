@@ -1,0 +1,77 @@
+import Foundation
+
+/// Configuration for API keys and app settings
+/// ⚠️ TEMPLATE FILE - Copy this to Config.swift and add your real API keys
+/// 
+/// Setup Instructions:
+/// 1. Copy this file and rename it to "Config.swift"
+/// 2. Replace placeholder values with your actual API keys
+/// 3. Never commit Config.swift to version control (it's in .gitignore)
+enum Config {
+    
+    // MARK: - Google Places API
+    
+    /// Your Google Places API Key
+    /// Get it from: https://console.cloud.google.com/google/maps-apis/credentials
+    /// 
+    /// Setup:
+    /// 1. Go to Google Cloud Console
+    /// 2. Enable Places API
+    /// 3. Create API Key
+    /// 4. Restrict to iOS app (your bundle ID)
+    /// 5. Paste the key below
+    static let googlePlacesAPIKey = "YOUR_GOOGLE_PLACES_API_KEY_HERE"
+    
+    // MARK: - Environment
+    
+    static var isProduction: Bool {
+        #if DEBUG
+        return false
+        #else
+        return true
+        #endif
+    }
+    
+    // MARK: - Feature Flags
+    
+    static let enableGoogleReviews = true
+    static let enableOfflineMode = true
+    static let enableAnalytics = true
+    
+    // MARK: - API Settings
+    
+    static let googlePlacesRateLimit: TimeInterval = 0.1 // seconds between requests
+    static let maxPhotosPerRestaurant = 10
+    static let maxReviewsToDisplay = 5
+    
+    // MARK: - Cache Settings
+    
+    static let googleDataCacheExpirationHours = 24 // Refresh after 24 hours
+    
+    // MARK: - Validation
+    
+    static func validateAPIKeys() -> [String] {
+        var errors: [String] = []
+        
+        if googlePlacesAPIKey == "YOUR_GOOGLE_PLACES_API_KEY_HERE" {
+            errors.append("Google Places API key not configured")
+        }
+        
+        return errors
+    }
+    
+    static func printConfiguration() {
+        print("📋 App Configuration:")
+        print("   Environment: \(isProduction ? "Production" : "Debug")")
+        print("   Google Reviews: \(enableGoogleReviews ? "Enabled" : "Disabled")")
+        print("   Offline Mode: \(enableOfflineMode ? "Enabled" : "Disabled")")
+        
+        let errors = validateAPIKeys()
+        if !errors.isEmpty {
+            print("⚠️  Configuration Warnings:")
+            errors.forEach { print("   - \($0)") }
+        } else {
+            print("✅ All API keys configured")
+        }
+    }
+}
