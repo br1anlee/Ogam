@@ -1,0 +1,56 @@
+# Xcode
+xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+build/
+DerivedData/
+*.moved-aside
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+
+# CocoaPods
+Pods/
+
+# Carthage
+Carthage/Build/
+
+# Firebase
+GoogleService-Info.plist
+
+# API Keys & Secrets - IMPORTANT!
+Config.swift
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Backup files
+*.backup
+*.bak
+*~
+
+# Log files
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+
+# API Keys & Secrets (match in any directory)
+**/Config.swift
+Config.swift
+
+# Firebase credentials
+**/GoogleService-Info.plist
+GoogleService-Info.plist
