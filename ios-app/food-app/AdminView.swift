@@ -59,6 +59,33 @@ struct AdminView: View {
                     .disabled(isUploadingImages)
                 }
                 
+                Section("Google Places Data") {
+                    Button {
+                        fetchGoogleDataForAll()
+                    } label: {
+                        HStack {
+                            Image(systemName: "globe")
+                            Text("Fetch Google Reviews & Photos")
+                            Spacer()
+                            if isImporting {
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(isImporting)
+                    
+                    Button {
+                        repository.clearGoogleDataCache()
+                        alertMessage = "Google data cache cleared"
+                        showAlert = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "trash")
+                            Text("Clear Google Data Cache")
+                        }
+                    }
+                }
+                
                 Section("Database Operations") {
                     Button {
                         Task {
@@ -288,6 +315,21 @@ struct AdminView: View {
                     alertMessage = "Delete failed: \(error.localizedDescription)"
                     showAlert = true
                 }
+            }
+        }
+    }
+    
+    func fetchGoogleDataForAll() {
+        isImporting = true
+        
+        Task {
+            let placesService = GooglePlacesService(apiKey: Config.googlePlacesAPIKey)
+            await repository.fetchAllGoogleData(placesService: placesService)
+            
+            await MainActor.run {
+                alertMessage = "Fetched Google data for all restaurants!"
+                showAlert = true
+                isImporting = false
             }
         }
     }

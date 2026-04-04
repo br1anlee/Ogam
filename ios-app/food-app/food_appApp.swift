@@ -29,6 +29,9 @@ struct food_appApp: App {
     init() {
         // Configure Firebase on app launch
         FirebaseConfig.shared.configure()
+        
+        // Print configuration status (helpful for debugging)
+        Config.printConfiguration()
     }
 
     var body: some Scene {
