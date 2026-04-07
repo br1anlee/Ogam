@@ -13,6 +13,7 @@ DerivedData/
 *.ipa
 *.dSYM.zip
 *.dSYM
+*.xcuserstate
 
 # Swift Package Manager
 .build/
@@ -23,10 +24,12 @@ Pods/
 # Carthage
 Carthage/Build/
 
-# Firebase
+# Firebase (match anywhere)
+**/GoogleService-Info.plist
 GoogleService-Info.plist
 
-# API Keys & Secrets - IMPORTANT!
+# API Keys & Secrets (match anywhere)
+**/Config.swift
 Config.swift
 
 # macOS
@@ -39,18 +42,3 @@ Config.swift
 *.backup
 *.bak
 *~
-
-# Log files
-*.log
-
-# Temporary files
-*.tmp
-*.temp
-
-# API Keys & Secrets (match in any directory)
-**/Config.swift
-Config.swift
-
-# Firebase credentials
-**/GoogleService-Info.plist
-GoogleService-Info.plist
