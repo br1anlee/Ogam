@@ -3,50 +3,15 @@ import MapKit
 import CoreLocation
 
 struct ContentView: View {
+    @EnvironmentObject var repository: RestaurantRepository
     @State private var favorites: Set<Restaurant> = []
 
     let favoritesKey = "favorite_restaurants"
 
-    let restaurants: [Restaurant] = [
-        Restaurant(
-            id: "hanbat",
-            name: "Han Bat Sul Lung Tang",
-            cuisine: "Korean",
-            rating: 4.7,
-            address: "4163 W 5th St, Los Angeles, CA",
-            description: "Known for comforting seolleongtang and late-night Korean comfort food.",
-            imageName: "hanbat",
-            latitude: 34.0637,
-            longitude: -118.3067
-        ),
-        Restaurant(
-            id: "marugame",
-            name: "Marugame Udon",
-            cuisine: "Japanese",
-            rating: 4.5,
-            address: "700 W 7th St, Los Angeles, CA",
-            description: "Fresh udon, tempura, and quick casual Japanese meals.",
-            imageName: "marugame",
-            latitude: 34.0489,
-            longitude: -118.2572
-        ),
-        Restaurant(
-            id: "bcd",
-            name: "BCD Tofu House",
-            cuisine: "Korean",
-            rating: 4.6,
-            address: "3575 Wilshire Blvd, Los Angeles, CA",
-            description: "Popular for soft tofu soup, Korean side dishes, and casual group meals.",
-            imageName: "bcd",
-            latitude: 34.0615,
-            longitude: -118.3009
-        )
-    ]
-
     var body: some View {
         TabView {
             SearchMapView(
-                restaurants: restaurants,
+                restaurants: repository.restaurants,
                 favorites: $favorites,
                 onFavoritesChanged: saveFavorites
             )
@@ -82,9 +47,17 @@ struct ContentView: View {
             .tabItem {
                 Label("Saved", systemImage: "heart")
             }
+
+            #if DEBUG
+            AdminView()
+                .tabItem {
+                    Label("Admin", systemImage: "wrench.and.screwdriver")
+                }
+            #endif
         }
         .onAppear {
             loadFavorites()
+            repository.startListening()
         }
     }
 
@@ -517,18 +490,17 @@ struct RestaurantRowView: View {
 
 struct RestaurantDetailView: View {
     let restaurant: Restaurant
+    @EnvironmentObject var repository: RestaurantRepository
+
+    @State private var googleData: RestaurantGoogleData?
+    @State private var isLoading = true
+    @State private var error: Error?
+
+    private let placesService = GooglePlacesService(apiKey: Config.googlePlacesAPIKey)
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Image(restaurant.imageName)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(height: 220)
-                    .frame(maxWidth: .infinity)
-                    .clipped()
-                    .cornerRadius(16)
-
                 Text(restaurant.name)
                     .font(.largeTitle)
                     .fontWeight(.bold)
@@ -545,40 +517,44 @@ struct RestaurantDetailView: View {
 
                 Text(restaurant.description)
                     .font(.body)
-                
-                // Google Reviews Button
-                if Config.enableGoogleReviews {
-                    NavigationLink(destination: ReviewsView(restaurant: restaurant)) {
-                        HStack {
-                            Image(systemName: "star.bubble")
-                                .font(.title3)
-                            
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("View Google Reviews")
-                                    .font(.headline)
-                                
-                                Text("See photos, ratings, and reviews")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            
-                            Spacer()
-                            
-                            Image(systemName: "chevron.right")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+
+                Divider()
+
+                if isLoading {
+                    ProgressView("Loading reviews...")
+                        .frame(maxWidth: .infinity)
                         .padding()
-                        .background(Color(.systemGray6))
-                        .cornerRadius(12)
-                    }
-                    .buttonStyle(.plain)
+                } else if let error = error {
+                    ErrorView(error: error, retry: loadReviews)
+                } else if let data = googleData {
+                    ReviewsContentView(restaurant: restaurant, googleData: data)
+                } else {
+                    EmptyReviewsView()
                 }
             }
             .padding()
         }
         .navigationTitle("Details")
         .navigationBarTitleDisplayMode(.inline)
+        .task {
+            await loadReviews()
+        }
+    }
+
+    func loadReviews() async {
+        isLoading = true
+        error = nil
+
+        do {
+            googleData = try await repository.fetchGoogleData(
+                for: restaurant,
+                placesService: placesService
+            )
+        } catch {
+            self.error = error
+        }
+
+        isLoading = false
     }
 }
 

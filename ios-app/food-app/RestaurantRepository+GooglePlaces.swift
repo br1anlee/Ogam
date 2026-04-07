@@ -1,5 +1,6 @@
 import Foundation
 import FirebaseFirestore
+import CoreLocation
 
 /// Extended repository for managing Google Places data
 extension RestaurantRepository {
@@ -69,7 +70,7 @@ extension RestaurantRepository {
                     "text": review.text,
                     "time": review.time,
                     "relative_time": review.relativeTimeDescription
-                ]
+                ] as [String: Any]
             },
             "google_photo_urls": data.photoURLs.map { $0.absoluteString },
             "google_phone": data.phoneNumber ?? "",
@@ -105,14 +106,18 @@ extension RestaurantRepository {
                 return nil
             }
             
-            // Create GoogleReview manually since we can't use decoder
-            return try? JSONDecoder().decode(GoogleReview.self, from: JSONEncoder().encode([
+            // Create GoogleReview using JSONSerialization to handle mixed types
+            let reviewJSON: [String: Any] = [
                 "author_name": authorName,
                 "rating": rating,
                 "text": text,
                 "time": time,
                 "relative_time_description": relativeTime
-            ]))
+            ]
+            guard let jsonData = try? JSONSerialization.data(withJSONObject: reviewJSON) else {
+                return nil
+            }
+            return try? JSONDecoder().decode(GoogleReview.self, from: jsonData)
         }
         
         let photoURLs = (data["google_photo_urls"] as? [String] ?? []).compactMap { URL(string: $0) }

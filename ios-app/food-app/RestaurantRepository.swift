@@ -9,7 +9,7 @@ class RestaurantRepository: ObservableObject {
     @Published var isLoading = false
     @Published var error: RepositoryError?
     
-    private let db = Firestore.firestore()
+    let db = Firestore.firestore()  // Changed from private to internal
     private var listener: ListenerRegistration?
     private let cacheManager = CacheManager()
     
@@ -282,9 +282,8 @@ class RestaurantRepository: ObservableObject {
         return location1.distance(from: location2)
     }
     
-    deinit {
-        stopListening()
-    }
+    // Don't need deinit - listener will be removed when object is deallocated
+    // Removed to avoid main actor isolation issues
 }
 
 // MARK: - Cache Manager

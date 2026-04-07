@@ -41,6 +41,28 @@ struct AdminView: View {
                         }
                     }
                     .disabled(isImporting)
+                    
+                    // NEW: PDF Import Test
+                    Button {
+                        importFromPDF()
+                    } label: {
+                        HStack {
+                            Image(systemName: "doc.richtext.fill")
+                                .foregroundStyle(.green)
+                            VStack(alignment: .leading) {
+                                Text("Import 10 Test Restaurants")
+                                    .font(.headline)
+                                Text("From PDF CSV (with Google data)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if isImporting {
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(isImporting)
                 }
                 
                 Section("Image Upload") {
@@ -330,6 +352,33 @@ struct AdminView: View {
                 alertMessage = "Fetched Google data for all restaurants!"
                 showAlert = true
                 isImporting = false
+            }
+        }
+    }
+    
+    func importFromPDF() {
+        isImporting = true
+        
+        Task {
+            do {
+                let placesService = GooglePlacesService(apiKey: Config.googlePlacesAPIKey)
+                let importer = PDFRestaurantImporter(placesService: placesService)
+                
+                print("🚀 Starting PDF import...")
+                try await importer.importFromCSV(fileName: "restaurants_from_pdf")
+                
+                await MainActor.run {
+                    importedCount += 10
+                    alertMessage = "Successfully imported 10 restaurants with reviews, photos, and all Google data!"
+                    showAlert = true
+                    isImporting = false
+                }
+            } catch {
+                await MainActor.run {
+                    alertMessage = "Import failed: \(error.localizedDescription)"
+                    showAlert = true
+                    isImporting = false
+                }
             }
         }
     }
