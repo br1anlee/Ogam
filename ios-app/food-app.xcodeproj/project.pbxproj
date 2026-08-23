@@ -13,7 +13,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		D3324FE42F79D006006E213C /* food-app.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "food-app.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		D3324FE42F79D006006E213C /* food-brian-app.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "food-brian-app.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -49,7 +49,7 @@
 		D3324FE52F79D006006E213C /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				D3324FE42F79D006006E213C /* food-app.app */,
+				D3324FE42F79D006006E213C /* food-brian-app.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -79,7 +79,7 @@
 				D31A2FB02F7E5E9300153F3F /* FirebaseStorage */,
 			);
 			productName = "food-app";
-			productReference = D3324FE42F79D006006E213C /* food-app.app */;
+			productReference = D3324FE42F79D006006E213C /* food-brian-app.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -267,6 +267,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"food-app/Preview Content\"";
+				DEVELOPMENT_TEAM = M8WDWZAYRV;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "We use your location to show nearby restaurants on the map.";
@@ -281,7 +282,7 @@
 				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "Brian.food-app";
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = "food-brian-app";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -296,6 +297,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"food-app/Preview Content\"";
+				DEVELOPMENT_TEAM = M8WDWZAYRV;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "We use your location to show nearby restaurants on the map.";
@@ -310,7 +312,7 @@
 				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "Brian.food-app";
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = "food-brian-app";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";

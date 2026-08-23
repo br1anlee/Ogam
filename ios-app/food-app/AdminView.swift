@@ -1,4 +1,5 @@
 import SwiftUI
+import FirebaseFirestore
 
 /// Admin view for managing restaurant data
 /// Add this to your app during development for easy data import
@@ -6,13 +7,124 @@ struct AdminView: View {
     @EnvironmentObject var repository: RestaurantRepository
     @State private var isImporting = false
     @State private var isUploadingImages = false
+    @State private var isDeDuplicating = false
+    @State private var isReindexing = false
+    @State private var reindexProgress = ""
     @State private var showAlert = false
     @State private var alertMessage = ""
     @State private var importedCount = 0
+
+    // Quick Add by Name
+    @State private var quickAddName = ""
+    @State private var quickAddCuisine = ""
+    @State private var isQuickAdding = false
+    @State private var searchResults: [TextSearchResult] = []
+    @State private var quickAddPreview: Restaurant? = nil
     
     var body: some View {
         NavigationStack {
             List {
+                Section("Quick Add by Name") {
+                    HStack {
+                        TextField("Restaurant name", text: $quickAddName)
+                            .onSubmit { if !quickAddName.trimmingCharacters(in: .whitespaces).isEmpty { searchAndPreview() } }
+                        if isQuickAdding && quickAddPreview == nil && searchResults.isEmpty {
+                            ProgressView()
+                                .padding(.leading, 4)
+                        } else {
+                            Button {
+                                searchAndPreview()
+                            } label: {
+                                Image(systemName: "magnifyingglass")
+                                    .foregroundStyle(.blue)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(quickAddName.trimmingCharacters(in: .whitespaces).isEmpty || isQuickAdding)
+                        }
+                    }
+                    TextField("Cuisine type (e.g. Korean BBQ)", text: $quickAddCuisine)
+
+                    if let preview = quickAddPreview {
+                        // — Preview card after picking a result —
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(preview.name)
+                                .font(.headline)
+                            Text(preview.address)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            if preview.rating > 0 {
+                                Text("⭐️ \(preview.rating, specifier: "%.1f")  |  \(preview.phoneNumber ?? "No phone")")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 4)
+
+                        Button {
+                            saveQuickAdd(preview)
+                        } label: {
+                            HStack {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(.green)
+                                Text("Save to Firebase")
+                            }
+                        }
+
+                        Button(role: .destructive) {
+                            quickAddPreview = nil
+                            searchResults = []
+                        } label: {
+                            Text("Back to Results")
+                        }
+
+                    } else if !searchResults.isEmpty {
+                        // — Search results list —
+                        ForEach(searchResults) { result in
+                            Button {
+                                loadPreview(for: result)
+                            } label: {
+                                HStack(spacing: 10) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(result.name)
+                                            .font(.subheadline)
+                                            .foregroundStyle(.primary)
+                                        if let addr = result.formattedAddress {
+                                            Text(addr)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(1)
+                                        }
+                                    }
+                                    Spacer()
+                                    if let r = result.rating {
+                                        Text("⭐️ \(r, specifier: "%.1f")")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    if isQuickAdding {
+                                        ProgressView()
+                                    } else {
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isQuickAdding)
+                        }
+
+                        Button(role: .destructive) {
+                            searchResults = []
+                            quickAddName = ""
+                            quickAddCuisine = ""
+                        } label: {
+                            Text("Cancel")
+                        }
+
+                    }
+                }
+
                 Section("Data Import") {
                     Button {
                         importSampleData()
@@ -27,13 +139,34 @@ struct AdminView: View {
                         }
                     }
                     .disabled(isImporting)
-                    
+
                     Button {
                         importFromJSON()
                     } label: {
                         HStack {
                             Image(systemName: "doc.text")
-                            Text("Import from JSON File")
+                            Text("Import from JSON File (sample_restaurants)")
+                            Spacer()
+                            if isImporting {
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(isImporting)
+
+                    Button {
+                        importFullDataset()
+                    } label: {
+                        HStack {
+                            Image(systemName: "arrow.down.doc.fill")
+                                .foregroundStyle(.orange)
+                            VStack(alignment: .leading) {
+                                Text("Import Full Seoul Dataset")
+                                    .font(.headline)
+                                Text("seoul_restaurants.json — batch upload")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                             Spacer()
                             if isImporting {
                                 ProgressView()
@@ -119,6 +252,26 @@ struct AdminView: View {
                             Text("Refresh from Firebase")
                         }
                     }
+
+                    Button {
+                        reindexSearchTokens()
+                    } label: {
+                        HStack {
+                            Image(systemName: "magnifyingglass.circle.fill")
+                                .foregroundStyle(.blue)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Reindex Search Tokens")
+                                Text(isReindexing ? reindexProgress : "Makes all restaurants searchable by name")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if isReindexing {
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(isReindexing)
                     
                     Button {
                         repository.clearCache()
@@ -142,6 +295,20 @@ struct AdminView: View {
                 }
                 
                 Section("Dangerous Operations") {
+                    Button(role: .destructive) {
+                        removeDuplicates()
+                    } label: {
+                        HStack {
+                            Image(systemName: "doc.on.doc.fill")
+                            Text("Remove Duplicate Restaurants")
+                            Spacer()
+                            if isDeDuplicating {
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(isDeDuplicating)
+
                     Button(role: .destructive) {
                         deleteAllData()
                     } label: {
@@ -356,6 +523,253 @@ struct AdminView: View {
         }
     }
     
+    func importFullDataset() {
+        isImporting = true
+        Task {
+            do {
+                let importer = DataImporter()
+                try await importer.importRestaurantsFromJSON(fileName: "seoul_restaurants")
+                await MainActor.run {
+                    alertMessage = "Full Seoul dataset imported successfully!"
+                    showAlert = true
+                    isImporting = false
+                }
+            } catch {
+                await MainActor.run {
+                    alertMessage = "Import failed: \(error.localizedDescription)"
+                    showAlert = true
+                    isImporting = false
+                }
+            }
+        }
+    }
+
+    func searchAndPreview() {
+        isQuickAdding = true
+        searchResults = []   // clear immediately so the spinner shows
+        quickAddPreview = nil
+        Task {
+            do {
+                let placesService = GooglePlacesService(apiKey: Config.googlePlacesAPIKey)
+                let results = try await placesService.searchRestaurants(query: quickAddName)
+                await MainActor.run {
+                    searchResults = results
+                    isQuickAdding = false
+                    if results.isEmpty {
+                        alertMessage = "No results found for \"\(quickAddName)\"."
+                        showAlert = true
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    alertMessage = "Search failed: \(error.localizedDescription)"
+                    showAlert = true
+                    isQuickAdding = false
+                }
+            }
+        }
+    }
+
+    func loadPreview(for result: TextSearchResult) {
+        isQuickAdding = true
+        Task {
+            do {
+                let placesService = GooglePlacesService(apiKey: Config.googlePlacesAPIKey)
+                let restaurant = try await placesService.createRestaurant(from: result, cuisine: quickAddCuisine)
+                await MainActor.run {
+                    quickAddPreview = restaurant
+                    isQuickAdding = false
+                }
+            } catch {
+                await MainActor.run {
+                    alertMessage = "Failed to load details: \(error.localizedDescription)"
+                    showAlert = true
+                    isQuickAdding = false
+                }
+            }
+        }
+    }
+
+    func saveQuickAdd(_ restaurant: Restaurant) {
+        Task {
+            // Check Firestore for an existing restaurant with the same name
+            let snapshot = try? await repository.db.collection("restaurants")
+                .whereField("name", isEqualTo: restaurant.name)
+                .limit(to: 1)
+                .getDocuments()
+
+            if let count = snapshot?.documents.count, count > 0 {
+                await MainActor.run {
+                    alertMessage = "'\(restaurant.name)' already exists in the database."
+                    showAlert = true
+                }
+                return
+            }
+
+            do {
+                try await repository.addRestaurant(restaurant)
+                await MainActor.run {
+                    importedCount += 1
+                    alertMessage = "Added \(restaurant.name) to Firebase!"
+                    showAlert = true
+                    quickAddPreview = nil
+                    searchResults = []
+                    quickAddName = ""
+                    quickAddCuisine = ""
+                }
+            } catch {
+                await MainActor.run {
+                    alertMessage = "Save failed: \(error.localizedDescription)"
+                    showAlert = true
+                }
+            }
+        }
+    }
+
+    func reindexSearchTokens() {
+        isReindexing = true
+        reindexProgress = "Loading restaurants..."
+        Task {
+            do {
+                // Page through entire collection
+                var allDocs: [QueryDocumentSnapshot] = []
+                var lastDoc: DocumentSnapshot? = nil
+                while true {
+                    var query = repository.db.collection("restaurants")
+                        .order(by: FieldPath.documentID())
+                        .limit(to: 500)
+                    if let last = lastDoc {
+                        query = query.start(afterDocument: last)
+                    }
+                    let snapshot = try await query.getDocuments()
+                    allDocs.append(contentsOf: snapshot.documents)
+                    await MainActor.run { reindexProgress = "Loaded \(allDocs.count) restaurants..." }
+                    if snapshot.documents.count < 500 { break }
+                    lastDoc = snapshot.documents.last
+                }
+
+                // Build batches of updateData calls
+                let chunks = stride(from: 0, to: allDocs.count, by: 400).map {
+                    Array(allDocs[$0..<min($0 + 400, allDocs.count)])
+                }
+
+                var updated = 0
+                for (i, chunk) in chunks.enumerated() {
+                    let batch = repository.db.batch()
+                    for doc in chunk {
+                        let data = doc.data()
+                        let name = data["name"] as? String ?? ""
+                        let cuisine = data["cuisine"] as? String ?? ""
+                        let tokens = Restaurant.makeSearchTokens(name: name, cuisine: cuisine)
+                        batch.updateData(["search_tokens": tokens], forDocument: doc.reference)
+                    }
+                    try await batch.commit()
+                    updated += chunk.count
+                    await MainActor.run {
+                        reindexProgress = "Updated \(updated)/\(allDocs.count) (\(i + 1)/\(chunks.count) batches)"
+                    }
+                }
+
+                await MainActor.run {
+                    alertMessage = "Reindex complete — \(allDocs.count) restaurants are now fully searchable."
+                    showAlert = true
+                    isReindexing = false
+                    reindexProgress = ""
+                }
+            } catch {
+                await MainActor.run {
+                    alertMessage = "Reindex failed: \(error.localizedDescription)"
+                    showAlert = true
+                    isReindexing = false
+                    reindexProgress = ""
+                }
+            }
+        }
+    }
+
+    func removeDuplicates() {
+        isDeDuplicating = true
+        Task {
+            do {
+                // Page through every document in the collection
+                var allDocs: [QueryDocumentSnapshot] = []
+                var lastDoc: DocumentSnapshot? = nil
+                while true {
+                    var query = repository.db.collection("restaurants")
+                        .order(by: FieldPath.documentID())
+                        .limit(to: 500)
+                    if let last = lastDoc {
+                        query = query.start(afterDocument: last)
+                    }
+                    let snapshot = try await query.getDocuments()
+                    allDocs.append(contentsOf: snapshot.documents)
+                    if snapshot.documents.count < 500 { break }
+                    lastDoc = snapshot.documents.last
+                }
+
+                // Group documents by lowercased name
+                var groups: [String: [QueryDocumentSnapshot]] = [:]
+                for doc in allDocs {
+                    let name = (doc.data()["name"] as? String ?? "")
+                        .lowercased()
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    groups[name, default: []].append(doc)
+                }
+
+                let duplicateGroups = groups.filter { $0.value.count > 1 }
+                guard !duplicateGroups.isEmpty else {
+                    await MainActor.run {
+                        alertMessage = "No duplicates found — database is clean."
+                        showAlert = true
+                        isDeDuplicating = false
+                    }
+                    return
+                }
+
+                // For each duplicate group, keep the most complete document
+                var toDelete: [QueryDocumentSnapshot] = []
+                for (_, docs) in duplicateGroups {
+                    let scored: [(QueryDocumentSnapshot, Int)] = docs.map { doc in
+                        let d = doc.data()
+                        var score = 0
+                        if let url = d["image_url"] as? String, !url.isEmpty { score += 2 }
+                        if let lat = d["latitude"] as? Double, lat != 0 { score += 1 }
+                        if let phone = d["phone_number"] as? String, !phone.isEmpty { score += 1 }
+                        if let hood = d["neighborhood"] as? String, !hood.isEmpty { score += 1 }
+                        if let tokens = d["search_tokens"] as? [String], !tokens.isEmpty { score += 1 }
+                        if let hours = d["hours"] as? String, !hours.isEmpty { score += 1 }
+                        return (doc, score)
+                    }.sorted { $0.1 > $1.1 }
+
+                    // Keep the highest-scored doc; mark the rest for deletion
+                    toDelete.append(contentsOf: scored.dropFirst().map { $0.0 })
+                }
+
+                // Delete in batches of 400
+                let chunks = stride(from: 0, to: toDelete.count, by: 400).map {
+                    Array(toDelete[$0..<min($0 + 400, toDelete.count)])
+                }
+                for chunk in chunks {
+                    let batch = repository.db.batch()
+                    for doc in chunk { batch.deleteDocument(doc.reference) }
+                    try await batch.commit()
+                }
+
+                await MainActor.run {
+                    alertMessage = "Removed \(toDelete.count) duplicate(s) across \(duplicateGroups.count) restaurant name(s)."
+                    showAlert = true
+                    isDeDuplicating = false
+                }
+            } catch {
+                await MainActor.run {
+                    alertMessage = "Dedup failed: \(error.localizedDescription)"
+                    showAlert = true
+                    isDeDuplicating = false
+                }
+            }
+        }
+    }
+
     func importFromPDF() {
         isImporting = true
         
