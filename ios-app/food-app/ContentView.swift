@@ -257,16 +257,14 @@ struct SearchMapView: View {
                             Button {
                                 selectedRestaurant = restaurant
                             } label: {
-                                VStack(spacing: 4) {
-                                    Image(systemName: "mappin.circle.fill")
-                                        .font(.title)
-                                        .foregroundStyle(.red)
-
-                                    Text(restaurant.name)
-                                        .font(.caption2)
-                                        .padding(6)
-                                        .background(.thinMaterial)
-                                        .cornerRadius(8)
+                                ZStack {
+                                    Circle()
+                                        .fill(.red)
+                                        .frame(width: 28, height: 28)
+                                        .shadow(color: .black.opacity(0.25), radius: 3, x: 0, y: 2)
+                                    Image(systemName: "fork.knife")
+                                        .font(.system(size: 12, weight: .bold))
+                                        .foregroundStyle(.white)
                                 }
                             }
                             .buttonStyle(.plain)
@@ -459,17 +457,26 @@ struct SearchMapView: View {
 
     var bottomResultsPanel: some View {
         VStack(spacing: 0) {
-            HStack {
-                Button {
-                    withAnimation(.easeInOut) { isListExpanded.toggle() }
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("\(filteredRestaurants.count) Restaurants")
-                            .font(.headline)
-                            .foregroundStyle(.primary)
+            // Drag handle
+            Capsule()
+                .fill(Color(.systemGray4))
+                .frame(width: 36, height: 5)
+                .padding(.top, 10)
+                .padding(.bottom, 8)
 
-                        Text(isListExpanded ? "Tap to hide" : "Tap to show")
-                            .font(.caption)
+            HStack(alignment: .center) {
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { isListExpanded.toggle() }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text("\(filteredRestaurants.count)")
+                            .font(.title3.weight(.bold))
+                            .foregroundStyle(.primary)
+                        Text("places")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Image(systemName: isListExpanded ? "chevron.down" : "chevron.up")
+                            .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -494,37 +501,33 @@ struct SearchMapView: View {
                         Image(systemName: sortOption.systemImage)
                         Text(sortOption.rawValue)
                     }
-                    .font(.caption)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.blue.opacity(0.1))
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.blue.opacity(0.12))
                     .foregroundStyle(.blue)
                     .clipShape(Capsule())
                 }
-
-                Button {
-                    withAnimation(.easeInOut) { isListExpanded.toggle() }
-                } label: {
-                    Image(systemName: isListExpanded ? "chevron.down" : "chevron.up")
-                        .foregroundStyle(.primary)
-                }
-                .buttonStyle(.plain)
             }
-            .padding()
+            .padding(.horizontal, 16)
+            .padding(.bottom, 12)
             .background(.ultraThinMaterial)
 
             if isListExpanded {
                 if filteredRestaurants.isEmpty {
-                    VStack(spacing: 8) {
-                        Text("No restaurants found nearby")
+                    VStack(spacing: 10) {
+                        Image(systemName: "fork.knife.circle")
+                            .font(.system(size: 36))
+                            .foregroundStyle(.secondary)
+                        Text("No restaurants found")
                             .font(.headline)
-                        Text("Restaurant locations are loading in the background. Try searching by name or cuisine in the meantime.")
+                        Text("Try moving the map or searching by name.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                     }
                     .frame(maxWidth: .infinity)
-                    .padding()
+                    .padding(.vertical, 32)
                     .background(.ultraThinMaterial)
                 } else {
                     ScrollView {
@@ -666,23 +669,40 @@ struct RestaurantSheetRowView: View {
 
     var body: some View {
         Button(action: onSelect) {
-            HStack(spacing: 12) {
-                RestaurantImageView(restaurant: restaurant, size: 88)
+            HStack(spacing: 14) {
+                RestaurantImageView(restaurant: restaurant, size: 80)
 
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 5) {
                     Text(restaurant.name)
-                        .font(.headline)
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
 
-                    Text(restaurant.cuisine)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        Text(restaurant.cuisine)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(Color.orange)
+                            .clipShape(Capsule())
+
+                        if let price = restaurant.priceRange {
+                            Text(priceSymbol(for: price))
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
 
                     if let rating = displayRating {
-                        Text("⭐️ \(rating, specifier: "%.1f")")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        HStack(spacing: 3) {
+                            Image(systemName: "star.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.yellow)
+                            Text(String(format: "%.1f", rating))
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.primary)
+                        }
                     }
 
                     Text(restaurant.address)
@@ -695,13 +715,13 @@ struct RestaurantSheetRowView: View {
 
                 Button(action: toggleFavorite) {
                     Image(systemName: isFavorite ? "heart.fill" : "heart")
-                        .foregroundStyle(isFavorite ? .red : .gray)
-                        .font(.title3)
+                        .foregroundStyle(isFavorite ? .red : Color(.systemGray3))
+                        .font(.system(size: 20))
                 }
                 .buttonStyle(.plain)
             }
-            .padding()
-            .background(Color.clear)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
         }
         .buttonStyle(.plain)
         .task {
@@ -798,61 +818,129 @@ struct RestaurantDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text(restaurant.name)
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
+            VStack(alignment: .leading, spacing: 0) {
+                // Hero image
+                heroImageView
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 200)
+                    .clipped()
 
-                HStack {
-                    Text(restaurant.cuisine)
-                    let displayRating = googleData?.rating ?? (restaurant.rating > 0 ? restaurant.rating : nil)
-                    if let rating = displayRating {
-                        Text("⭐️ \(rating, specifier: "%.1f")")
+                VStack(alignment: .leading, spacing: 18) {
+                    // Name
+                    Text(restaurant.name)
+                        .font(.title2.weight(.bold))
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    // Cuisine + rating + price row
+                    HStack(spacing: 8) {
+                        Text(restaurant.cuisine)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(Color.orange)
+                            .clipShape(Capsule())
+
+                        let displayRating = googleData?.rating ?? (restaurant.rating > 0 ? restaurant.rating : nil)
+                        if let rating = displayRating {
+                            HStack(spacing: 3) {
+                                Image(systemName: "star.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(.yellow)
+                                Text(String(format: "%.1f", rating))
+                                    .font(.subheadline.weight(.semibold))
+                            }
+                        }
+
+                        if let price = restaurant.priceRange {
+                            Text(priceSymbol(for: price))
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    // Address
+                    Button { openInMaps(restaurant: restaurant) } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "location.fill")
+                                .foregroundStyle(.blue)
+                                .frame(width: 18)
+                            Text(restaurant.address)
+                                .font(.subheadline)
+                                .foregroundStyle(.primary)
+                                .multilineTextAlignment(.leading)
+                            Spacer()
+                            Image(systemName: "arrow.up.right")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(14)
+                        .background(Color(.systemGray6))
+                        .cornerRadius(14)
+                    }
+                    .buttonStyle(.plain)
+
+                    // Description — skip auto-generated placeholder text
+                    let desc = restaurant.description
+                    if !desc.isEmpty && !desc.hasPrefix("\(restaurant.name) —") {
+                        Text(desc)
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Divider()
+
+                    // Google data
+                    if isLoading {
+                        HStack {
+                            Spacer()
+                            VStack(spacing: 8) {
+                                ProgressView()
+                                Text("Loading reviews…")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                        }
+                        .padding(.vertical, 28)
+                    } else if let error = error {
+                        ErrorView(error: error, retry: loadReviews)
+                    } else if let data = googleData {
+                        ReviewsContentView(restaurant: restaurant, googleData: data)
+                    } else {
+                        EmptyReviewsView()
                     }
                 }
-                .font(.headline)
-                .foregroundStyle(.secondary)
-
-                Button {
-                    openInMaps(restaurant: restaurant)
-                } label: {
-                    HStack {
-                        Image(systemName: "map.fill")
-                        Text(restaurant.address)
-                        Spacer()
-                        Image(systemName: "arrow.up.right")
-                            .font(.caption)
-                    }
-                    .font(.subheadline)
-                    .padding()
-                    .background(Color(.systemGray6))
-                    .foregroundStyle(.blue)
-                    .cornerRadius(12)
-                }
-
-                Text(restaurant.description)
-                    .font(.body)
-
-                Divider()
-
-                if isLoading {
-                    ProgressView("Loading reviews...")
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                } else if let error = error {
-                    ErrorView(error: error, retry: loadReviews)
-                } else if let data = googleData {
-                    ReviewsContentView(restaurant: restaurant, googleData: data)
-                } else {
-                    EmptyReviewsView()
-                }
+                .padding()
             }
-            .padding()
         }
-        .navigationTitle("Details")
         .navigationBarTitleDisplayMode(.inline)
-        .task {
-            await loadReviews()
+        .task { await loadReviews() }
+    }
+
+    @ViewBuilder
+    private var heroImageView: some View {
+        if let urlString = restaurant.imageURL, let url = URL(string: urlString) {
+            AsyncImage(url: url) { img in
+                img.resizable().scaledToFill()
+            } placeholder: {
+                placeholderHero
+            }
+        } else {
+            placeholderHero
+        }
+    }
+
+    private var placeholderHero: some View {
+        LinearGradient(
+            colors: [Color.orange.opacity(0.45), Color.red.opacity(0.25)],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+        .overlay {
+            Image(systemName: "fork.knife")
+                .font(.system(size: 52))
+                .foregroundStyle(.white.opacity(0.55))
         }
     }
 
