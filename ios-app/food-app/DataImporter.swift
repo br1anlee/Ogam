@@ -15,22 +15,98 @@ class DataImporter {
         guard let url = Bundle.main.url(forResource: fileName, withExtension: "json") else {
             throw ImportError.fileNotFound
         }
-        
-        let data = try Data(contentsOf: url)
-        let restaurants = try JSONDecoder().decode([Restaurant].self, from: data)
-        
-        print("📦 Found \(restaurants.count) restaurants in JSON file")
-        
-        for (index, restaurant) in restaurants.enumerated() {
-            do {
-                try await addRestaurant(restaurant)
-                print("✅ [\(index + 1)/\(restaurants.count)] Added: \(restaurant.name)")
-            } catch {
-                print("❌ [\(index + 1)/\(restaurants.count)] Failed to add \(restaurant.name): \(error)")
-            }
+
+        let rawData = try Data(contentsOf: url)
+
+        // Parse as raw dictionaries so we can sanitize null values before decoding
+        guard var rawArray = try JSONSerialization.jsonObject(with: rawData) as? [[String: Any]] else {
+            throw ImportError.fileNotFound
         }
-        
+
+        rawArray = rawArray.map { dict in
+            var d = dict
+            // Fill required non-optional fields that may be null in the source JSON
+            if d["rating"] == nil || d["rating"] is NSNull { d["rating"] = 0.0 }
+            if d["latitude"] == nil || d["latitude"] is NSNull { d["latitude"] = 0.0 }
+            if d["longitude"] == nil || d["longitude"] is NSNull { d["longitude"] = 0.0 }
+            if (d["image_name"] as? String) == nil { d["image_name"] = "placeholder" }
+            if (d["address"] as? String) == nil { d["address"] = "" }
+            if (d["description"] as? String) == nil { d["description"] = "" }
+            // Map station → tags so the nearest subway station is searchable
+            if let station = d["station"] as? String, !station.isEmpty {
+                var tags = d["tags"] as? [String] ?? []
+                if !tags.contains(station) { tags.append(station) }
+                d["tags"] = tags
+            }
+            d.removeValue(forKey: "station")
+            return d
+        }
+
+        // Build Restaurant objects directly from dictionaries to avoid
+        // @DocumentID Codable issues when the "id" key is absent from JSON
+        let restaurants: [Restaurant] = rawArray.compactMap { dict in
+            guard let name = dict["name"] as? String,
+                  let cuisine = dict["cuisine"] as? String else { return nil }
+            return Restaurant(
+                name: name,
+                cuisine: cuisine,
+                rating: dict["rating"] as? Double ?? 0.0,
+                address: dict["address"] as? String ?? "",
+                description: dict["description"] as? String ?? "",
+                imageName: dict["image_name"] as? String ?? "placeholder",
+                latitude: dict["latitude"] as? Double ?? 0.0,
+                longitude: dict["longitude"] as? Double ?? 0.0,
+                city: dict["city"] as? String,
+                neighborhood: dict["neighborhood"] as? String,
+                priceRange: dict["price_range"] as? Int,
+                phoneNumber: dict["phone_number"] as? String,
+                tags: dict["tags"] as? [String],
+                hours: dict["hours"] as? String
+            )
+        }
+
+        print("📦 Found \(restaurants.count) restaurants in \(fileName).json")
+
+        try await batchImport(restaurants)
+
         print("🎉 Import complete!")
+    }
+
+    /// Batch import using Firestore batch writes (500 ops max per batch)
+    private func batchImport(_ restaurants: [Restaurant]) async throws {
+        // Fetch existing names to skip duplicates
+        print("🔍 Checking for duplicates...")
+        let snapshot = try await db.collection("restaurants").getDocuments()
+        let existingNames = Set(snapshot.documents.compactMap { $0.data()["name"] as? String })
+
+        let unique = restaurants.filter { !existingNames.contains($0.name) }
+        let skipped = restaurants.count - unique.count
+        if skipped > 0 {
+            print("⚠️  Skipping \(skipped) duplicate(s) already in the database")
+        }
+        if unique.isEmpty {
+            print("✅ Nothing new to import — all restaurants already exist")
+            return
+        }
+
+        let batchSize = 400
+        let chunks = stride(from: 0, to: unique.count, by: batchSize).map {
+            Array(unique[$0..<min($0 + batchSize, unique.count)])
+        }
+
+        for (index, chunk) in chunks.enumerated() {
+            let batch = db.batch()
+            for restaurant in chunk {
+                var r = restaurant
+                r.id = nil
+                r.searchTokens = Restaurant.makeSearchTokens(name: r.name, cuisine: r.cuisine)
+                let docRef = db.collection("restaurants").document()
+                try batch.setData(from: r, forDocument: docRef)
+            }
+            try await batch.commit()
+            print("✅ Batch \(index + 1)/\(chunks.count) committed (\(chunk.count) restaurants)")
+        }
+        print("📊 Import summary: \(unique.count) added, \(skipped) skipped as duplicates")
     }
     
     /// Import restaurants from an array (for manual data entry)

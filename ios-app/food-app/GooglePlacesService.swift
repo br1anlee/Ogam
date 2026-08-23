@@ -139,6 +139,102 @@ class GooglePlacesService {
         )
     }
     
+    // MARK: - Search by Name and Create Restaurant
+
+    /// Search Google Places by name, fetch all details, and return a Restaurant ready for Firebase
+    func searchAndCreateRestaurant(query: String, cuisine: String, description: String) async throws -> Restaurant {
+        // Step 1: Text search to get place_id
+        let endpoint = "\(baseURL)/place/textsearch/json"
+        var components = URLComponents(string: endpoint)
+        components?.queryItems = [
+            URLQueryItem(name: "query", value: query),
+            URLQueryItem(name: "type", value: "restaurant"),
+            URLQueryItem(name: "key", value: apiKey)
+        ]
+
+        guard let url = components?.url else { throw PlacesError.invalidURL }
+
+        let (data, _) = try await URLSession.shared.data(from: url)
+        let response = try JSONDecoder().decode(TextSearchResponse.self, from: data)
+
+        guard response.status == "OK", let first = response.results.first else {
+            throw PlacesError.apiError(response.status == "OK" ? "No results found" : response.status)
+        }
+
+        // Step 2: Get full details
+        let details = try await getPlaceDetails(placeId: first.placeId)
+
+        // Step 3: Build photo URL from first available photo
+        let photoURLString = details.photos?.first.flatMap {
+            getPhotoURL(photoReference: $0.photoReference)
+        }?.absoluteString
+
+        // Step 4: Format hours as a single string
+        let hoursString = details.openingHours?.weekdayText?.joined(separator: ", ") ?? ""
+
+        let finalDescription = description.isEmpty
+            ? "\(details.name) — \(details.formattedAddress ?? "")"
+            : description
+
+        return Restaurant(
+            name: details.name,
+            cuisine: cuisine.isEmpty ? "Restaurant" : cuisine,
+            rating: details.rating ?? 0.0,
+            address: details.formattedAddress ?? "",
+            description: finalDescription,
+            imageName: "placeholder",
+            imageURL: photoURLString,
+            latitude: details.geometry?.location.lat ?? 0,
+            longitude: details.geometry?.location.lng ?? 0,
+            priceRange: details.priceLevel,
+            phoneNumber: details.formattedPhoneNumber,
+            hours: hoursString
+        )
+    }
+
+    // MARK: - Search for Multiple Results
+
+    /// Returns up to 5 candidate results for the given query without fetching full details
+    func searchRestaurants(query: String) async throws -> [TextSearchResult] {
+        let endpoint = "\(baseURL)/place/textsearch/json"
+        var components = URLComponents(string: endpoint)
+        components?.queryItems = [
+            URLQueryItem(name: "query", value: query),
+            URLQueryItem(name: "type", value: "restaurant"),
+            URLQueryItem(name: "key", value: apiKey)
+        ]
+        guard let url = components?.url else { throw PlacesError.invalidURL }
+        let (data, _) = try await URLSession.shared.data(from: url)
+        let response = try JSONDecoder().decode(TextSearchResponse.self, from: data)
+        guard response.status == "OK" else {
+            throw PlacesError.apiError(response.status)
+        }
+        return Array(response.results.prefix(5))
+    }
+
+    /// Fetch full details for a single search result and return a Restaurant ready for Firebase
+    func createRestaurant(from result: TextSearchResult, cuisine: String) async throws -> Restaurant {
+        let details = try await getPlaceDetails(placeId: result.placeId)
+        let photoURLString = details.photos?.first.flatMap {
+            getPhotoURL(photoReference: $0.photoReference)
+        }?.absoluteString
+        let hoursString = details.openingHours?.weekdayText?.joined(separator: ", ") ?? ""
+        return Restaurant(
+            name: details.name,
+            cuisine: cuisine.isEmpty ? "Restaurant" : cuisine,
+            rating: details.rating ?? 0.0,
+            address: details.formattedAddress ?? "",
+            description: "\(details.name) — \(details.formattedAddress ?? "")",
+            imageName: "placeholder",
+            imageURL: photoURLString,
+            latitude: details.geometry?.location.lat ?? 0,
+            longitude: details.geometry?.location.lng ?? 0,
+            priceRange: details.priceLevel,
+            phoneNumber: details.formattedPhoneNumber,
+            hours: hoursString
+        )
+    }
+
     // MARK: - Batch Fetch for Multiple Restaurants
     
     /// Fetch data for multiple restaurants (with rate limiting)
@@ -312,4 +408,28 @@ struct Geometry: Codable {
 struct LocationCoordinate: Codable {
     let lat: Double
     let lng: Double
+}
+
+// MARK: - Text Search Models
+
+struct TextSearchResponse: Codable {
+    let results: [TextSearchResult]
+    let status: String
+}
+
+struct TextSearchResult: Codable, Identifiable {
+    var id: String { placeId }
+    let placeId: String
+    let name: String
+    let formattedAddress: String?
+    let geometry: Geometry?
+    let rating: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case placeId = "place_id"
+        case name
+        case formattedAddress = "formatted_address"
+        case geometry
+        case rating
+    }
 }

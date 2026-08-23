@@ -25,7 +25,10 @@ struct Restaurant: Identifiable, Hashable, Codable {
     // Firestore metadata
     let createdAt: Date?
     let updatedAt: Date?
-    
+
+    // Lowercase word tokens from name + cuisine, used for array-contains search
+    var searchTokens: [String]?
+
     enum CodingKeys: String, CodingKey {
         case id
         case name
@@ -46,8 +49,9 @@ struct Restaurant: Identifiable, Hashable, Codable {
         case hours
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+        case searchTokens = "search_tokens"
     }
-    
+
     // Convenience initializer for backward compatibility
     init(
         id: String? = nil,
@@ -68,7 +72,8 @@ struct Restaurant: Identifiable, Hashable, Codable {
         isOpenNow: Bool? = nil,
         hours: String? = nil,
         createdAt: Date? = nil,
-        updatedAt: Date? = nil
+        updatedAt: Date? = nil,
+        searchTokens: [String]? = nil
     ) {
         self.id = id
         self.name = name
@@ -89,6 +94,18 @@ struct Restaurant: Identifiable, Hashable, Codable {
         self.hours = hours
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.searchTokens = searchTokens
+    }
+
+    /// Generates lowercase word tokens for Firestore array-contains search.
+    /// e.g. "짠 JJAN Korean Gastropub" + "Korean" → ["짠", "jjan", "korean", "gastropub"]
+    static func makeSearchTokens(name: String, cuisine: String) -> [String] {
+        let combined = "\(name) \(cuisine)"
+        let words = combined.lowercased()
+            .components(separatedBy: .whitespacesAndNewlines)
+            .map { $0.trimmingCharacters(in: .punctuationCharacters) }
+            .filter { !$0.isEmpty }
+        return Array(Set(words))
     }
     
     // Computed property for image display

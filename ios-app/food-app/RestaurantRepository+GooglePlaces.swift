@@ -146,7 +146,7 @@ extension RestaurantRepository {
         }
     }
     
-    private func loadCachedGoogleData(for restaurantId: String) -> RestaurantGoogleData? {
+    func loadCachedGoogleData(for restaurantId: String) -> RestaurantGoogleData? {
         guard let data = UserDefaults.standard.data(forKey: "google_data_\(restaurantId)") else {
             return nil
         }
@@ -154,6 +154,32 @@ extension RestaurantRepository {
         return try? JSONDecoder().decode(RestaurantGoogleData.self, from: data)
     }
     
+    func prefetchRating(for restaurant: Restaurant, placesService: GooglePlacesService) {
+        guard let id = restaurant.id,
+              googleRatings[id] == nil,
+              !fetchingRatingIDs.contains(id) else { return }
+
+        // Serve from UserDefaults cache instantly — no API call
+        if let cached = loadCachedGoogleData(for: id) {
+            if let rating = cached.rating {
+                googleRatings[id] = rating
+            }
+            return
+        }
+
+        // Not cached — fetch from Google Places API
+        fetchingRatingIDs.insert(id)
+        Task {
+            do {
+                let data = try await fetchGoogleData(for: restaurant, placesService: placesService)
+                if let rating = data?.rating {
+                    googleRatings[id] = rating
+                }
+            } catch { }
+            fetchingRatingIDs.remove(id)
+        }
+    }
+
     func clearGoogleDataCache() {
         let defaults = UserDefaults.standard
         let dictionary = defaults.dictionaryRepresentation()

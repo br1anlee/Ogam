@@ -123,7 +123,7 @@ struct RatingSummaryView: View {
                 // Price Level
                 if let priceLevel = googleData.priceLevel {
                     VStack(alignment: .trailing, spacing: 4) {
-                        Text(String(repeating: "₩", count: priceLevel))
+                        Text(priceSymbol(for: priceLevel))
                             .font(.title2)
                             .foregroundStyle(.orange)
                         
