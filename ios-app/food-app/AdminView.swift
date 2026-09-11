@@ -10,6 +10,8 @@ struct AdminView: View {
     @State private var isDeDuplicating = false
     @State private var isReindexing = false
     @State private var reindexProgress = ""
+    @State private var isRefreshingHours = false
+    @State private var hoursRefreshProgress = ""
     @State private var showAlert = false
     @State private var alertMessage = ""
     @State private var importedCount = 0
@@ -216,6 +218,24 @@ struct AdminView: View {
                 
                 Section("Google Places Data") {
                     Button {
+                        refreshGoogleHours()
+                    } label: {
+                        HStack {
+                            Image(systemName: "clock.arrow.2.circlepath")
+                                .foregroundStyle(.green)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Refresh Google Hours")
+                                Text(isRefreshingHours ? hoursRefreshProgress : "Fetches open/closed hours for all restaurants")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if isRefreshingHours { ProgressView() }
+                        }
+                    }
+                    .disabled(isRefreshingHours || isImporting)
+
+                    Button {
                         fetchGoogleDataForAll()
                     } label: {
                         HStack {
@@ -227,8 +247,8 @@ struct AdminView: View {
                             }
                         }
                     }
-                    .disabled(isImporting)
-                    
+                    .disabled(isImporting || isRefreshingHours)
+
                     Button {
                         repository.clearGoogleDataCache()
                         alertMessage = "Google data cache cleared"
@@ -508,13 +528,37 @@ struct AdminView: View {
         }
     }
     
+    func refreshGoogleHours() {
+        isRefreshingHours = true
+        let total = repository.restaurants.filter { $0.googleHours == nil || $0.googleHours!.isEmpty }.count
+        guard total > 0 else {
+            alertMessage = "All restaurants already have hours data."
+            showAlert = true
+            isRefreshingHours = false
+            return
+        }
+        hoursRefreshProgress = "0 / \(total)"
+        Task {
+            let placesService = GooglePlacesService(apiKey: Config.googlePlacesAPIKey)
+            await repository.refreshGoogleHours(placesService: placesService) { done, total in
+                hoursRefreshProgress = "\(done) / \(total)"
+            }
+            await MainActor.run {
+                alertMessage = "Hours refreshed for \(total) restaurant(s). Open/closed status will now appear in the list."
+                showAlert = true
+                isRefreshingHours = false
+                hoursRefreshProgress = ""
+            }
+        }
+    }
+
     func fetchGoogleDataForAll() {
         isImporting = true
-        
+
         Task {
             let placesService = GooglePlacesService(apiKey: Config.googlePlacesAPIKey)
             await repository.fetchAllGoogleData(placesService: placesService)
-            
+
             await MainActor.run {
                 alertMessage = "Fetched Google data for all restaurants!"
                 showAlert = true
@@ -660,7 +704,16 @@ struct AdminView: View {
                         let data = doc.data()
                         let name = data["name"] as? String ?? ""
                         let cuisine = data["cuisine"] as? String ?? ""
-                        let tokens = Restaurant.makeSearchTokens(name: name, cuisine: cuisine)
+                        let address = data["address"] as? String ?? ""
+                        let city = data["city"] as? String
+                        let neighborhood = data["neighborhood"] as? String
+                        let tokens = Restaurant.makeSearchTokens(
+                            name: name,
+                            cuisine: cuisine,
+                            address: address,
+                            city: city,
+                            neighborhood: neighborhood
+                        )
                         batch.updateData(["search_tokens": tokens], forDocument: doc.reference)
                     }
                     try await batch.commit()
