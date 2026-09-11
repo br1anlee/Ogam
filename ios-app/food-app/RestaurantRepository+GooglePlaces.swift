@@ -10,9 +10,10 @@ extension RestaurantRepository {
     /// Fetch Google data for a single restaurant and cache it
     func fetchGoogleData(for restaurant: Restaurant, placesService: GooglePlacesService) async throws -> RestaurantGoogleData? {
         guard let restaurantId = restaurant.id else { return nil }
-        
-        // Check cache first
-        if let cached = loadCachedGoogleData(for: restaurantId) {
+
+        // Use cache only if it contains hours; stale entries (no hours) fall through to re-fetch.
+        if let cached = loadCachedGoogleData(for: restaurantId),
+           let hours = cached.openingHours, !hours.isEmpty {
             print("Using cached Google data for: \(restaurant.name)")
             return cached
         }
@@ -30,10 +31,14 @@ extension RestaurantRepository {
         
         // Cache the data
         cacheGoogleData(googleData, for: restaurantId)
-        
+
+        // Update in-memory caches so the list view reflects hours/rating immediately
+        if let rating = googleData.rating { googleRatings[restaurantId] = rating }
+        if let hours = googleData.openingHours, !hours.isEmpty { googleHoursCache[restaurantId] = hours }
+
         // Optionally save to Firestore for persistence
         try await saveGoogleDataToFirestore(googleData, restaurantId: restaurantId)
-        
+
         return googleData
     }
     
@@ -155,28 +160,55 @@ extension RestaurantRepository {
     }
     
     func prefetchRating(for restaurant: Restaurant, placesService: GooglePlacesService) {
-        guard let id = restaurant.id,
-              googleRatings[id] == nil,
-              !fetchingRatingIDs.contains(id) else { return }
+        guard let id = restaurant.id else { return }
+        guard !fetchingRatingIDs.contains(id) else { return }
 
-        // Serve from UserDefaults cache instantly — no API call
+        // Already have everything we need in memory
+        if googleRatings[id] != nil && googleHoursCache[id] != nil { return }
+
+        // Try UserDefaults cache
         if let cached = loadCachedGoogleData(for: id) {
-            if let rating = cached.rating {
+            if googleRatings[id] == nil, let rating = cached.rating {
                 googleRatings[id] = rating
             }
-            return
+            if googleHoursCache[id] == nil, let hours = cached.openingHours, !hours.isEmpty {
+                googleHoursCache[id] = hours
+                return // Cache had hours — we're done
+            }
+            // Cache exists but has no hours (stale pre-hours data).
+            // fetchGoogleData already skips stale entries and re-fetches, so no manual clearing needed.
         }
 
-        // Not cached — fetch from Google Places API
+        // Still missing something — fire API fetch
+        guard googleRatings[id] == nil || googleHoursCache[id] == nil else { return }
+
         fetchingRatingIDs.insert(id)
         Task {
             do {
                 let data = try await fetchGoogleData(for: restaurant, placesService: placesService)
-                if let rating = data?.rating {
-                    googleRatings[id] = rating
-                }
+                if let rating = data?.rating { googleRatings[id] = rating }
+                if let hours = data?.openingHours, !hours.isEmpty { googleHoursCache[id] = hours }
             } catch { }
             fetchingRatingIDs.remove(id)
+        }
+    }
+
+    /// Force-refreshes Google data (bypassing cache) for all restaurants that are missing hours.
+    func refreshGoogleHours(placesService: GooglePlacesService, onProgress: @escaping (Int, Int) -> Void) async {
+        let toRefresh = restaurants.filter {
+            ($0.googleHours == nil || $0.googleHours!.isEmpty) && $0.id != nil
+        }
+        for (i, restaurant) in toRefresh.enumerated() {
+            guard let id = restaurant.id else { continue }
+            UserDefaults.standard.removeObject(forKey: "google_data_\(id)")
+            do {
+                let data = try await fetchGoogleData(for: restaurant, placesService: placesService)
+                if let hours = data?.openingHours, !hours.isEmpty {
+                    googleHoursCache[id] = hours
+                }
+            } catch { }
+            await MainActor.run { onProgress(i + 1, toRefresh.count) }
+            try? await Task.sleep(nanoseconds: 300_000_000)
         }
     }
 
