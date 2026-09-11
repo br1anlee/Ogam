@@ -17,6 +17,7 @@ class RestaurantRepository: ObservableObject {
     @Published var hasMore = true
     @Published var isLoadingMore = false
     @Published var googleRatings: [String: Double] = [:]
+    @Published var googleHoursCache: [String: [String]] = [:]
     private var lastDocument: DocumentSnapshot?
     private let pageSize = 200
     
@@ -211,10 +212,21 @@ class RestaurantRepository: ObservableObject {
     func addRestaurant(_ restaurant: Restaurant) async throws {
         var restaurantData = restaurant
         restaurantData.id = nil
-        restaurantData.searchTokens = Restaurant.makeSearchTokens(name: restaurant.name, cuisine: restaurant.cuisine)
+        restaurantData.searchTokens = Restaurant.makeSearchTokens(
+            name: restaurant.name,
+            cuisine: restaurant.cuisine,
+            address: restaurant.address,
+            city: restaurant.city,
+            neighborhood: restaurant.neighborhood
+        )
 
         do {
             let docRef = try db.collection("restaurants").addDocument(from: restaurantData)
+            // Mirror the new restaurant into the in-memory list so it shows up in search immediately
+            var saved = restaurantData
+            saved.id = docRef.documentID
+            restaurants.append(saved)
+            cacheRestaurants(restaurants)
             print("✅ Added restaurant with ID: \(docRef.documentID)")
         } catch {
             print("❌ Failed to add restaurant: \(error)")
@@ -276,6 +288,7 @@ class RestaurantRepository: ObservableObject {
         let isOpenNow: Bool?
         let hours: String?
         let searchTokens: [String]?
+        let googleHours: [String]?
 
         init(_ r: Restaurant) {
             id = r.id; name = r.name; cuisine = r.cuisine; rating = r.rating
@@ -283,7 +296,7 @@ class RestaurantRepository: ObservableObject {
             imageURL = r.imageURL; latitude = r.latitude; longitude = r.longitude
             city = r.city; neighborhood = r.neighborhood; priceRange = r.priceRange
             phoneNumber = r.phoneNumber; tags = r.tags; isOpenNow = r.isOpenNow
-            hours = r.hours; searchTokens = r.searchTokens
+            hours = r.hours; searchTokens = r.searchTokens; googleHours = r.googleHours
         }
 
         func toRestaurant() -> Restaurant {
@@ -293,7 +306,7 @@ class RestaurantRepository: ObservableObject {
                 imageURL: imageURL, latitude: latitude, longitude: longitude,
                 city: city, neighborhood: neighborhood, priceRange: priceRange,
                 phoneNumber: phoneNumber, tags: tags, isOpenNow: isOpenNow,
-                hours: hours, searchTokens: searchTokens
+                hours: hours, searchTokens: searchTokens, googleHours: googleHours
             )
         }
     }
@@ -366,14 +379,22 @@ class RestaurantRepository: ObservableObject {
             for restaurant in batch {
                 guard let id = restaurant.id else { continue }
 
-                let locationHint: String
-                if let tags = restaurant.tags,
-                   let station = tags.first(where: { $0.hasSuffix("역") }) {
-                    locationHint = station
+                // Use the full address if available; fall back to Seoul subway-station hint
+                // for Korean restaurants (tags ending in 역) that lack a proper address.
+                let query: String
+                let isKoreanStation = restaurant.tags?.contains(where: { $0.hasSuffix("역") }) ?? false
+                if !restaurant.address.trimmingCharacters(in: .whitespaces).isEmpty && !isKoreanStation {
+                    query = restaurant.address
                 } else {
-                    locationHint = restaurant.neighborhood ?? restaurant.name
+                    let locationHint: String
+                    if isKoreanStation,
+                       let station = restaurant.tags?.first(where: { $0.hasSuffix("역") }) {
+                        locationHint = station
+                    } else {
+                        locationHint = restaurant.neighborhood ?? restaurant.name
+                    }
+                    query = "\(locationHint), Seoul, South Korea"
                 }
-                let query = "\(locationHint), Seoul, South Korea"
 
                 do {
                     let placemarks = try await geocoder.geocodeAddressString(query)

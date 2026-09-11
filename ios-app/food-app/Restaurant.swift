@@ -29,6 +29,10 @@ struct Restaurant: Identifiable, Hashable, Codable {
     // Lowercase word tokens from name + cuisine, used for array-contains search
     var searchTokens: [String]?
 
+    // Google Places weekday hours, e.g. ["Monday: 10:00 AM – 10:00 PM", ...]
+    // Written to Firestore by saveGoogleDataToFirestore; loaded automatically with restaurant data.
+    var googleHours: [String]?
+
     enum CodingKeys: String, CodingKey {
         case id
         case name
@@ -50,6 +54,7 @@ struct Restaurant: Identifiable, Hashable, Codable {
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case searchTokens = "search_tokens"
+        case googleHours = "google_hours"
     }
 
     // Convenience initializer for backward compatibility
@@ -73,7 +78,8 @@ struct Restaurant: Identifiable, Hashable, Codable {
         hours: String? = nil,
         createdAt: Date? = nil,
         updatedAt: Date? = nil,
-        searchTokens: [String]? = nil
+        searchTokens: [String]? = nil,
+        googleHours: [String]? = nil
     ) {
         self.id = id
         self.name = name
@@ -95,17 +101,32 @@ struct Restaurant: Identifiable, Hashable, Codable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.searchTokens = searchTokens
+        self.googleHours = googleHours
     }
 
     /// Generates lowercase word tokens for Firestore array-contains search.
-    /// e.g. "짠 JJAN Korean Gastropub" + "Korean" → ["짠", "jjan", "korean", "gastropub"]
-    static func makeSearchTokens(name: String, cuisine: String) -> [String] {
-        let combined = "\(name) \(cuisine)"
-        let words = combined.lowercased()
+    /// Covers name, cuisine, city, neighborhood, and zip codes extracted from address.
+    static func makeSearchTokens(
+        name: String,
+        cuisine: String,
+        address: String = "",
+        city: String? = nil,
+        neighborhood: String? = nil
+    ) -> [String] {
+        let combined = "\(name) \(cuisine) \(city ?? "") \(neighborhood ?? "")"
+        var tokens = combined.lowercased()
             .components(separatedBy: .whitespacesAndNewlines)
             .map { $0.trimmingCharacters(in: .punctuationCharacters) }
             .filter { !$0.isEmpty }
-        return Array(Set(words))
+
+        // Pull 5-digit US zip codes out of the address string
+        let zipTokens = address
+            .components(separatedBy: .whitespaces)
+            .map { $0.trimmingCharacters(in: .punctuationCharacters) }
+            .filter { $0.count == 5 && $0.allSatisfy(\.isNumber) }
+        tokens.append(contentsOf: zipTokens)
+
+        return Array(Set(tokens))
     }
     
     // Computed property for image display

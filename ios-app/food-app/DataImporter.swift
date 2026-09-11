@@ -129,8 +129,8 @@ class DataImporter {
     
     private func addRestaurant(_ restaurant: Restaurant) async throws {
         var restaurantData = restaurant
-        restaurantData.id = nil // Let Firestore generate ID
-        
+        restaurantData.id = nil
+        restaurantData.searchTokens = Restaurant.makeSearchTokens(name: restaurant.name, cuisine: restaurant.cuisine)
         let docRef = try db.collection("restaurants").addDocument(from: restaurantData)
         print("   Added with ID: \(docRef.documentID)")
     }

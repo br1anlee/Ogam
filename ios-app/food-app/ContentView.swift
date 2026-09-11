@@ -14,6 +14,93 @@ func priceSymbol(for level: Int) -> String {
     return String(repeating: symbol, count: level)
 }
 
+private enum OpenStatus {
+    case openNow(closingAt: Date)
+    case closingSoon(minutes: Int, closingAt: Date)
+    case closed(openingAt: Date)
+    case closedToday                          // closed the entire day — no opening time
+    case openingSoon(minutes: Int, openingAt: Date)
+    case unknown
+}
+
+/// Parses a single time-range string like "10:00 AM – 10:00 PM", "10 AM – 9 PM", or "10:00 AM - 10:00 PM".
+private func parseOpenStatus(from hours: String) -> OpenStatus {
+    // Accept both en dash (Google) and regular hyphen
+    let raw = hours.replacingOccurrences(of: "\u{2013}", with: "-")
+    let parts = raw.components(separatedBy: " - ")
+    guard parts.count == 2 else { return .unknown }
+
+    // Try "h:mm a" first, then "h a" (Google omits ":00" for round hours like "11 AM")
+    func parseTime(_ string: String) -> Date? {
+        let s = string.trimmingCharacters(in: .whitespaces)
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "h:mm a"
+        if let d = fmt.date(from: s) { return d }
+        fmt.dateFormat = "h a"
+        return fmt.date(from: s)
+    }
+
+    guard let openTime = parseTime(parts[0]),
+          let closeTime = parseTime(parts[1]) else {
+        return .unknown
+    }
+
+    let now = Date()
+    let cal = Calendar.current
+
+    let todayOpen = cal.date(bySettingHour: cal.component(.hour, from: openTime),
+                             minute: cal.component(.minute, from: openTime),
+                             second: 0, of: now)!
+    var todayClose = cal.date(bySettingHour: cal.component(.hour, from: closeTime),
+                              minute: cal.component(.minute, from: closeTime),
+                              second: 0, of: now)!
+
+    // Handle hours that wrap past midnight (e.g. 6 PM – 2 AM)
+    if todayClose <= todayOpen {
+        todayClose = cal.date(byAdding: .day, value: 1, to: todayClose)!
+    }
+
+    let minutesToClose = Int(todayClose.timeIntervalSince(now) / 60)
+    let minutesToOpen  = Int(todayOpen.timeIntervalSince(now) / 60)
+
+    if now >= todayOpen && now < todayClose {
+        return minutesToClose <= 60
+            ? .closingSoon(minutes: minutesToClose, closingAt: todayClose)
+            : .openNow(closingAt: todayClose)
+    } else if minutesToOpen > 0 && minutesToOpen <= 60 {
+        return .openingSoon(minutes: minutesToOpen, openingAt: todayOpen)
+    } else {
+        return .closed(openingAt: todayOpen)
+    }
+}
+
+/// Parses Google Places weekday_text array (e.g. ["Monday: 10:00 AM – 10:00 PM", ...])
+/// and returns the open status for the current day.
+private func parseOpenStatusFromWeekly(_ days: [String]) -> OpenStatus {
+    let cal = Calendar.current
+    let todayName = cal.weekdaySymbols[cal.component(.weekday, from: Date()) - 1]
+
+    guard let todayEntry = days.first(where: { $0.hasPrefix(todayName) }),
+          let colonRange = todayEntry.range(of: ": ") else { return .unknown }
+
+    let timeRange = String(todayEntry[colonRange.upperBound...])
+
+    switch timeRange.lowercased() {
+    case "closed":          return .closedToday
+    case "open 24 hours":   return .openNow(closingAt: Calendar.current.startOfDay(for: Date().addingTimeInterval(86400)))
+    default:                return parseOpenStatus(from: timeRange)
+    }
+}
+
+private func formatHourTime(_ date: Date) -> String {
+    let mins = Calendar.current.component(.minute, from: date)
+    let fmt = DateFormatter()
+    fmt.locale = Locale(identifier: "en_US_POSIX")
+    fmt.dateFormat = mins == 0 ? "h a" : "h:mm a"
+    return fmt.string(from: date)
+}
+
 enum SortOption: String, CaseIterable, Identifiable {
     case rating = "Rating"
     case distance = "Distance"
@@ -132,6 +219,11 @@ struct SearchMapView: View {
     @State private var isListExpanded = false
     @State private var focusedRestaurantID: String? = nil
 
+    // Live search / autocomplete
+    @FocusState private var foodFieldFocused: Bool
+    @State private var autocompleteItems: [String] = []
+    @State private var searchDebounceTask: Task<Void, Never>? = nil
+
     // Filter state
     @State private var showFilterSheet = false
     @State private var selectedCuisines: Set<String> = []
@@ -143,8 +235,14 @@ struct SearchMapView: View {
 
     // Viewport-based filtering (Yelp-style)
     @State private var visibleRegion: MKCoordinateRegion? = nil
-    @State private var committedRegion: MKCoordinateRegion? = nil
     @State private var hasMovedMap = false
+
+    // Initialized to match the default map position so the list is always viewport-filtered,
+    // even before the user's location is known.
+    @State private var committedRegion: MKCoordinateRegion? = MKCoordinateRegion(
+        center: CLLocationCoordinate2D(latitude: 34.0575, longitude: -118.2870),
+        span: MKCoordinateSpan(latitudeDelta: 0.08, longitudeDelta: 0.08)
+    )
 
     @State private var position = MapCameraPosition.region(
         MKCoordinateRegion(
@@ -189,12 +287,15 @@ struct SearchMapView: View {
                 restaurant.name.localizedCaseInsensitiveContains(committedFoodQuery) ||
                 restaurant.cuisine.localizedCaseInsensitiveContains(committedFoodQuery) ||
                 restaurant.address.localizedCaseInsensitiveContains(committedFoodQuery) ||
-                restaurant.description.localizedCaseInsensitiveContains(committedFoodQuery)
+                restaurant.description.localizedCaseInsensitiveContains(committedFoodQuery) ||
+                (restaurant.city?.localizedCaseInsensitiveContains(committedFoodQuery) ?? false) ||
+                (restaurant.neighborhood?.localizedCaseInsensitiveContains(committedFoodQuery) ?? false)
             }
         }
 
-        // Viewport filter — skip when a text search is active (show results city-wide)
-        if !hasTextQuery, let region = committedRegion {
+        // Viewport filter — skip when a text search is active (show results city-wide).
+        // Fall back to visibleRegion so the list always reflects what's on screen.
+        if !hasTextQuery, let region = committedRegion ?? visibleRegion {
             let latMin = region.center.latitude  - region.span.latitudeDelta  / 2
             let latMax = region.center.latitude  + region.span.latitudeDelta  / 2
             let lngMin = region.center.longitude - region.span.longitudeDelta / 2
@@ -304,48 +405,156 @@ struct SearchMapView: View {
                 }
 
                 VStack(spacing: 0) {
-                    HStack(spacing: 8) {
-                        TextField("Korean BBQ, ramen, cafe", text: $foodQuery)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.subheadline)
-                            .submitLabel(.search)
-                            .frame(maxWidth: .infinity)
-                            .onChange(of: foodQuery) { _, newValue in
-                                if newValue.trimmingCharacters(in: .whitespaces).isEmpty {
+                    // ── Yelp-style stacked search bars ──────────────────
+                    VStack(spacing: 0) {
+                        // Food field
+                        HStack(spacing: 10) {
+                            Image(systemName: "magnifyingglass")
+                                .foregroundStyle(.secondary)
+                            TextField("Restaurants, food, cuisines", text: $foodQuery)
+                                .focused($foodFieldFocused)
+                                .submitLabel(.search)
+                                .onChange(of: foodQuery) { _, newValue in
+                                    handleFoodQueryChange(newValue)
+                                }
+                                .onSubmit {
+                                    foodFieldFocused = false
+                                    autocompleteItems = []
+                                    runFoodSearch()
+                                    runLocationSearch()
+                                }
+                            if !foodQuery.isEmpty {
+                                Button {
+                                    foodQuery = ""
                                     dbSearchResults = []
                                     committedFoodQuery = ""
+                                    autocompleteItems = []
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundStyle(Color(.systemGray3))
                                 }
                             }
-                            .onSubmit { runFoodSearch() }
-
-                        TextField("Current location, ZIP, city, neighborhood", text: $locationQuery)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.subheadline)
-                            .submitLabel(.search)
-                            .frame(maxWidth: .infinity)
-
-                        Button("Search") {
-                            runFoodSearch()
-                            runLocationSearch()
                         }
-                        .buttonStyle(.borderedProminent)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 11)
 
-                        Button {
-                            showFilterSheet = true
-                        } label: {
-                            Image(systemName: hasActiveFilters ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
-                                .font(.title3)
-                                .foregroundStyle(hasActiveFilters ? .blue : .primary)
+                        Divider().padding(.leading, 38)
+
+                        // Location field
+                        HStack(spacing: 10) {
+                            Image(systemName: "location.fill")
+                                .foregroundStyle(.blue)
+                            TextField("City, neighborhood, ZIP", text: $locationQuery)
+                                .submitLabel(.search)
+                                .onSubmit {
+                                    foodFieldFocused = false
+                                    autocompleteItems = []
+                                    runFoodSearch()
+                                    runLocationSearch()
+                                }
+                            if !locationQuery.isEmpty {
+                                Button {
+                                    locationQuery = ""
+                                    committedRegion = nil
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundStyle(Color(.systemGray3))
+                                }
+                            }
                         }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 11)
                     }
-                    .controlSize(.small)
-                    .onSubmit {
-                        runLocationSearch()
+                    .background(Color(.systemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .shadow(color: .black.opacity(0.12), radius: 8, x: 0, y: 3)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+
+                    // Autocomplete dropdown
+                    if foodFieldFocused && !autocompleteItems.isEmpty {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(autocompleteItems, id: \.self) { item in
+                                Button {
+                                    foodQuery = item
+                                    handleFoodQueryChange(item)
+                                    foodFieldFocused = false
+                                    autocompleteItems = []
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        Image(systemName: "magnifyingglass")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        Text(item)
+                                            .font(.subheadline)
+                                            .foregroundStyle(.primary)
+                                        Spacer()
+                                    }
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 11)
+                                }
+                                if item != autocompleteItems.last {
+                                    Divider().padding(.leading, 40)
+                                }
+                            }
+                        }
+                        .background(Color(.systemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .shadow(color: .black.opacity(0.12), radius: 8, x: 0, y: 4)
+                        .padding(.horizontal, 12)
+                        .padding(.top, 4)
                     }
-                    .padding()
+
+                    // ── Quick filter pills (always visible) ─────────────
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            QuickFilterChip(
+                                label: "Open Now",
+                                icon: "clock.fill",
+                                isActive: showOpenNowOnly
+                            ) { showOpenNowOnly.toggle() }
+
+                            QuickFilterChip(
+                                label: "4.0+",
+                                icon: "star.fill",
+                                isActive: minimumRating >= 4.0
+                            ) { minimumRating = minimumRating >= 4.0 ? 0 : 4.0 }
+
+                            ForEach(1...4, id: \.self) { price in
+                                QuickFilterChip(
+                                    label: priceSymbol(for: price),
+                                    isActive: selectedPriceRange.contains(price)
+                                ) {
+                                    if selectedPriceRange.contains(price) {
+                                        selectedPriceRange.remove(price)
+                                    } else {
+                                        selectedPriceRange.insert(price)
+                                    }
+                                }
+                            }
+
+                            Button {
+                                showFilterSheet = true
+                            } label: {
+                                HStack(spacing: 5) {
+                                    Image(systemName: "line.3.horizontal.decrease")
+                                    Text("More")
+                                }
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 13)
+                                .padding(.vertical, 7)
+                                .background(hasActiveFilters ? Color.blue : Color(.systemGray5))
+                                .foregroundStyle(hasActiveFilters ? .white : .primary)
+                                .clipShape(Capsule())
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                    }
                     .background(.ultraThinMaterial)
 
-                    if hasActiveFilters {
+                    // Active filter chips strip (selected cuisines + clear all)
+                    if !selectedCuisines.isEmpty {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 6) {
                                 ForEach(Array(selectedCuisines).sorted(), id: \.self) { cuisine in
@@ -353,25 +562,6 @@ struct SearchMapView: View {
                                         selectedCuisines.remove(cuisine)
                                     }
                                 }
-
-                                ForEach(Array(selectedPriceRange).sorted(), id: \.self) { price in
-                                    FilterChipView(label: priceSymbol(for: price)) {
-                                        selectedPriceRange.remove(price)
-                                    }
-                                }
-
-                                if minimumRating > 0 {
-                                    FilterChipView(label: String(format: "%.1f+ stars", minimumRating)) {
-                                        minimumRating = 0
-                                    }
-                                }
-
-                                if showOpenNowOnly {
-                                    FilterChipView(label: "Open Now") {
-                                        showOpenNowOnly = false
-                                    }
-                                }
-
                                 Button("Clear All") {
                                     selectedCuisines.removeAll()
                                     selectedPriceRange.removeAll()
@@ -434,6 +624,16 @@ struct SearchMapView: View {
                     committedRegion = region
                     visibleRegion = region
                     hasMovedMap = false
+                    // Auto-fill location field with current city name
+                    if locationQuery.isEmpty {
+                        Task {
+                            let cl = CLLocation(latitude: newLocation.latitude, longitude: newLocation.longitude)
+                            if let placemark = try? await CLGeocoder().reverseGeocodeLocation(cl).first,
+                               let city = placemark.locality {
+                                locationQuery = city
+                            }
+                        }
+                    }
                 }
             }
             .sheet(item: $selectedRestaurant) { restaurant in
@@ -457,61 +657,78 @@ struct SearchMapView: View {
 
     var bottomResultsPanel: some View {
         VStack(spacing: 0) {
-            // Drag handle
-            Capsule()
-                .fill(Color(.systemGray4))
-                .frame(width: 36, height: 5)
-                .padding(.top, 10)
-                .padding(.bottom, 8)
+            // Header: drag handle + count/sort row — swipe down to collapse, swipe up to expand
+            VStack(spacing: 0) {
+                Capsule()
+                    .fill(Color(.systemGray4))
+                    .frame(width: 36, height: 5)
+                    .padding(.top, 10)
+                    .padding(.bottom, 8)
 
-            HStack(alignment: .center) {
-                Button {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { isListExpanded.toggle() }
-                } label: {
-                    HStack(spacing: 6) {
-                        Text("\(filteredRestaurants.count)")
-                            .font(.title3.weight(.bold))
-                            .foregroundStyle(.primary)
-                        Text("places")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        Image(systemName: isListExpanded ? "chevron.down" : "chevron.up")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                HStack(alignment: .center) {
+                    Button {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { isListExpanded.toggle() }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text("\(filteredRestaurants.count)")
+                                .font(.title3.weight(.bold))
+                                .foregroundStyle(.primary)
+                            Text("places")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Image(systemName: isListExpanded ? "chevron.down" : "chevron.up")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
+
+                    Menu {
+                        ForEach(SortOption.allCases) { option in
+                            Button {
+                                sortOption = option
+                            } label: {
+                                if sortOption == option {
+                                    Label(option.rawValue, systemImage: "checkmark")
+                                } else {
+                                    Text(option.rawValue)
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: sortOption.systemImage)
+                            Text(sortOption.rawValue)
+                        }
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.blue.opacity(0.12))
+                        .foregroundStyle(.blue)
+                        .clipShape(Capsule())
                     }
                 }
-                .buttonStyle(.plain)
-
-                Spacer()
-
-                Menu {
-                    ForEach(SortOption.allCases) { option in
-                        Button {
-                            sortOption = option
-                        } label: {
-                            if sortOption == option {
-                                Label(option.rawValue, systemImage: "checkmark")
-                            } else {
-                                Text(option.rawValue)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
+            }
+            .background(.ultraThinMaterial)
+            .gesture(
+                DragGesture(minimumDistance: 10)
+                    .onEnded { value in
+                        let dy = value.translation.height
+                        if isListExpanded && dy > 50 {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                isListExpanded = false
+                            }
+                        } else if !isListExpanded && dy < -50 {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                isListExpanded = true
                             }
                         }
                     }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: sortOption.systemImage)
-                        Text(sortOption.rawValue)
-                    }
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.blue.opacity(0.12))
-                    .foregroundStyle(.blue)
-                    .clipShape(Capsule())
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 12)
-            .background(.ultraThinMaterial)
+            )
 
             if isListExpanded {
                 if filteredRestaurants.isEmpty {
@@ -586,6 +803,50 @@ struct SearchMapView: View {
         }
     }
 
+    func handleFoodQueryChange(_ newValue: String) {
+        let trimmed = newValue.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty {
+            dbSearchResults = []
+            committedFoodQuery = ""
+            autocompleteItems = []
+            searchDebounceTask?.cancel()
+            return
+        }
+        // Update in-memory filter immediately (fast, no network)
+        committedFoodQuery = trimmed
+        withAnimation(.easeInOut) { isListExpanded = true }
+        // Refresh autocomplete from in-memory restaurants
+        autocompleteItems = generateAutocomplete(for: trimmed)
+        // Debounce Firestore search to avoid firing on every keystroke
+        searchDebounceTask?.cancel()
+        searchDebounceTask = Task {
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard !Task.isCancelled else { return }
+            isSearchingDB = true
+            dbSearchResults = await repository.searchByName(trimmed)
+            isSearchingDB = false
+        }
+    }
+
+    func generateAutocomplete(for query: String) -> [String] {
+        let q = query.lowercased()
+        var suggestions: [String] = []
+        // Matching cuisine types first
+        let cuisines = Set(restaurants.map(\.cuisine))
+            .filter { $0.localizedCaseInsensitiveContains(q) }
+            .sorted()
+        suggestions.append(contentsOf: cuisines.prefix(3))
+        // Then matching restaurant names
+        let names = restaurants
+            .filter { $0.name.localizedCaseInsensitiveContains(q) }
+            .prefix(4)
+            .map(\.name)
+        suggestions.append(contentsOf: names)
+        // Deduplicate preserving order, cap at 5
+        var seen = Set<String>()
+        return suggestions.filter { seen.insert($0).inserted }.prefix(5).map { $0 }
+    }
+
     func runLocationSearch() {
         let trimmed = locationQuery.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -607,11 +868,14 @@ struct SearchMapView: View {
         Task {
             do {
                 let placemarks = try await CLGeocoder().geocodeAddressString(trimmed)
-                if let coordinate = placemarks.first?.location?.coordinate {
+                if let placemark = placemarks.first, let coordinate = placemark.location?.coordinate {
                     searchCoordinate = coordinate
+                    // Use a span wide enough to cover a full city (~18km), shrink for neighborhoods
+                    let isNeighborhood = placemark.subLocality != nil
+                    let delta = isNeighborhood ? 0.08 : 0.18
                     let region = MKCoordinateRegion(
                         center: coordinate,
-                        span: MKCoordinateSpan(latitudeDelta: 0.08, longitudeDelta: 0.08)
+                        span: MKCoordinateSpan(latitudeDelta: delta, longitudeDelta: delta)
                     )
                     position = .region(region)
                     committedRegion = region
@@ -666,6 +930,24 @@ struct RestaurantSheetRowView: View {
         if let id = restaurant.id, let cached = repository.googleRatings[id] { return cached }
         return restaurant.rating > 0 ? restaurant.rating : nil
     }
+    private var resolvedOpenStatus: OpenStatus {
+        let id = restaurant.id ?? ""
+        // 1. Firestore-persisted Google hours (available after first Google data fetch)
+        if let weeklyHours = restaurant.googleHours, !weeklyHours.isEmpty {
+            return parseOpenStatusFromWeekly(weeklyHours)
+        }
+        // 2. In-memory cache from this session's prefetchRating
+        if let weeklyHours = repository.googleHoursCache[id], !weeklyHours.isEmpty {
+            return parseOpenStatusFromWeekly(weeklyHours)
+        }
+        // 3. Admin-added restaurants store hours as a comma-joined weekday string
+        if let hours = restaurant.hours, !hours.isEmpty {
+            let dayEntries = hours.components(separatedBy: ", ").filter { $0.contains(":") && $0.contains(" ") }
+            if !dayEntries.isEmpty { return parseOpenStatusFromWeekly(dayEntries) }
+            return parseOpenStatus(from: hours)
+        }
+        return .unknown
+    }
 
     var body: some View {
         Button(action: onSelect) {
@@ -705,6 +987,8 @@ struct RestaurantSheetRowView: View {
                         }
                     }
 
+                    openStatusView(for: resolvedOpenStatus)
+
                     Text(restaurant.address)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -726,6 +1010,50 @@ struct RestaurantSheetRowView: View {
         .buttonStyle(.plain)
         .task {
             repository.prefetchRating(for: restaurant, placesService: placesService)
+        }
+    }
+
+    @ViewBuilder
+    private func openStatusView(for status: OpenStatus) -> some View {
+        switch status {
+        case .openNow(let closingAt):
+            HStack(spacing: 3) {
+                Text("Open Now")
+                    .foregroundStyle(.green)
+                Text("· Closes \(formatHourTime(closingAt))")
+                    .foregroundStyle(.secondary)
+            }
+            .font(.caption.weight(.medium))
+        case .closingSoon(let mins, let closingAt):
+            HStack(spacing: 3) {
+                Text("Closing in \(mins) min")
+                    .foregroundStyle(.orange)
+                Text("· \(formatHourTime(closingAt))")
+                    .foregroundStyle(.secondary)
+            }
+            .font(.caption.weight(.medium))
+        case .closed(let openingAt):
+            HStack(spacing: 3) {
+                Text("Closed")
+                    .foregroundStyle(.red)
+                Text("· Opens \(formatHourTime(openingAt))")
+                    .foregroundStyle(.secondary)
+            }
+            .font(.caption.weight(.medium))
+        case .openingSoon(let mins, let openingAt):
+            HStack(spacing: 3) {
+                Text("Opens in \(mins) min")
+                    .foregroundStyle(.orange)
+                Text("· \(formatHourTime(openingAt))")
+                    .foregroundStyle(.secondary)
+            }
+            .font(.caption.weight(.medium))
+        case .closedToday:
+            Text("Closed Today")
+                .foregroundStyle(.red)
+                .font(.caption.weight(.medium))
+        case .unknown:
+            EmptyView()
         }
     }
 
@@ -1025,6 +1353,31 @@ struct RestaurantImageView: View {
                     .font(.title2)
                     .foregroundStyle(.gray)
             }
+    }
+}
+
+struct QuickFilterChip: View {
+    let label: String
+    var icon: String? = nil
+    let isActive: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 4) {
+                if let icon {
+                    Image(systemName: icon)
+                        .font(.caption2.weight(.semibold))
+                }
+                Text(label)
+                    .font(.caption.weight(.semibold))
+            }
+            .padding(.horizontal, 13)
+            .padding(.vertical, 7)
+            .background(isActive ? Color.blue : Color(.systemGray5))
+            .foregroundStyle(isActive ? .white : .primary)
+            .clipShape(Capsule())
+        }
     }
 }
 
