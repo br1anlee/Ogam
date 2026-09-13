@@ -174,7 +174,7 @@ If someone clones your repository:
 
 ## 💡 Current Status
 
-**Your API key:** `GOOGLE_PLACES_API_KEY_REDACTED`
+**Your API key:** `AIzaSyA0Z1I5q9yrgSDBVzW0iGkpDBOBbHwjoAM`
 
 **Location:** `Config.swift` (local file only)
 

@@ -189,7 +189,7 @@ Consider these alternatives:
 
 **Your current API key in Config.swift is:**
 ```
-GOOGLE_PLACES_API_KEY_REDACTED
+AIzaSyA0Z1I5q9yrgSDBVzW0iGkpDBOBbHwjoAM
 ```
 
 **Status:** ⚠️ Currently in your local file  
