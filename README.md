@@ -1,5 +1,7 @@
 # Ogam
 
+> 🚧 Actively developed — some features (e.g. admin panel) are still being refined.
+
 **Ogam** (오감) means "five senses" in Korean — the experience of discovering a great meal through sight, smell, sound, taste, and touch. This iOS app helps you find Korean restaurants in Los Angeles and Seoul, with live Google ratings, photos, hours, and reviews.
 
 ---
